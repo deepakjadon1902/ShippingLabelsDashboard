@@ -69,7 +69,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
             {label.receiver_city}, {label.receiver_state} - <b className="tracking-wide">{label.receiver_pincode}</b>
           </div>
           <div className={"mt-1.5 " + (isCompact ? "text-[12px]" : "text-[15px]")}>
-            <span className="uppercase tracking-wider font-semibold text-black/70 text-[0.85em]">Mob::</span>{" "}
+            <span className="uppercase tracking-wider font-semibold text-black/70 text-[0.85em]">Mob - </span>{" "}
             <span className="font-mono font-semibold tracking-wide">
               {label.receiver_mobile_1}
               {label.receiver_mobile_2 ? `, ${label.receiver_mobile_2}` : ""}

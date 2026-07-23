@@ -193,7 +193,8 @@
     padding: 6mm;
   }
 
-  /* The label component itself. */
+  /* The label component itself. Inner padding is handled by the component
+     so the saffron accent bar spans edge-to-edge. */
   .print-label,
   .print-label-full {
     width: 100%;
@@ -202,15 +203,12 @@
     border: 1px dashed #000 !important;
     background: white !important;
     color: black !important;
-    padding: 4mm;
+    padding: 0 !important;
     overflow: hidden;
     page-break-inside: avoid;
     break-inside: avoid;
   }
 
-  .print-label-full {
-    padding: 10mm;
-  }
 
   /* Preserve QR + barcode blacks exactly. */
   .print-label svg,

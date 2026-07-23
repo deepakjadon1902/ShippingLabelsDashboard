@@ -10,53 +10,66 @@ interface Props {
 
 export function ShippingLabel({ label, size = "compact" }: Props) {
   const isCompact = size === "compact";
-  const qrSize = isCompact ? 84 : 132;
-  const barcodeHeight = isCompact ? 40 : 62;
-  const barcodeWidth = isCompact ? 1.5 : 2.2;
-  const barcodeFontSize = isCompact ? 11 : 15;
+  const qrSize = isCompact ? 92 : 150;
+  const barcodeHeight = isCompact ? 52 : 90;
+  const barcodeWidth = isCompact ? 1.7 : 2.6;
+  const barcodeFontSize = isCompact ? 12 : 17;
 
   const trackingForBarcode = (label.tracking_id || "").trim();
   const canRenderBarcode = trackingForBarcode.length > 0 && trackingForBarcode !== "—";
+
+  const fontStack =
+    "'Manrope', 'Inter', 'Helvetica Neue', Helvetica, Arial, ui-sans-serif, system-ui, sans-serif";
+  const monoStack =
+    "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
   return (
     <div
       className={
         (isCompact
-          ? "print-label text-black bg-white text-[11px] leading-tight p-2.5"
-          : "print-label-full text-black bg-white text-base leading-snug p-5") +
-        " border border-dashed border-black flex flex-col h-full w-full"
+          ? "print-label text-[12px] leading-tight p-3"
+          : "print-label-full text-[17px] leading-snug p-6") +
+        " text-black bg-white border border-dashed border-black flex flex-col h-full w-full justify-between"
       }
       style={{
-        fontFamily: "'Inter', 'Helvetica Neue', Helvetica, Arial, ui-sans-serif, system-ui, sans-serif",
-        fontFeatureSettings: "'tnum' 1, 'cv11' 1",
+        fontFamily: fontStack,
+        fontFeatureSettings: "'tnum' 1, 'ss01' 1, 'cv11' 1",
       }}
     >
+      {/* Header */}
       <div
         className={
-          "border-b-2 border-black pb-1 mb-2 font-black tracking-[0.25em] text-center " +
-          (isCompact ? "text-sm" : "text-2xl")
+          "border-b-2 border-black pb-1.5 mb-2 font-extrabold tracking-[0.35em] text-center " +
+          (isCompact ? "text-sm" : "text-3xl")
         }
       >
         PARCEL LABEL
       </div>
 
-      {/* Top: receiver on the left, QR neatly filling the right corner */}
-      <div className="flex gap-3 min-h-0">
-        <div className="flex-1 min-w-0">
+      {/* Middle: address + QR — grows to fill available vertical space */}
+      <div className="flex gap-3 flex-1 min-h-0">
+        <div className="flex-1 min-w-0 flex flex-col">
           <div
             className={
-              "font-semibold text-muted-foreground/90 tracking-wider " +
-              (isCompact ? "text-[10px]" : "text-sm") +
-              " uppercase text-black/70"
+              "font-bold tracking-[0.2em] text-black/70 " +
+              (isCompact ? "text-[10px]" : "text-[13px]")
             }
           >
-            To
+            TO
           </div>
-          <div className={"font-extrabold tracking-tight leading-snug " + (isCompact ? "text-[15px]" : "text-[22px]")}>
+          <div
+            className={
+              "font-extrabold tracking-tight leading-tight mt-0.5 " +
+              (isCompact ? "text-[17px]" : "text-[26px]")
+            }
+          >
             {label.receiver_name}
           </div>
           <div
-            className={"mt-0.5 break-words leading-snug text-black/90 " + (isCompact ? "text-[11.5px]" : "text-[15px]")}
+            className={
+              "mt-1 break-words leading-snug text-black " +
+              (isCompact ? "text-[12.5px]" : "text-[17px]")
+            }
           >
             {label.receiver_address_line1}
             {label.receiver_address_line2 ? (
@@ -66,20 +79,32 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
               </>
             ) : null}
             <br />
-            {label.receiver_city}, {label.receiver_state} - <b className="tracking-wide">{label.receiver_pincode}</b>
+            {label.receiver_city}, {label.receiver_state} -{" "}
+            <b className="tracking-wide" style={{ fontFamily: monoStack }}>
+              {label.receiver_pincode}
+            </b>
           </div>
-          <div className={"mt-1.5 " + (isCompact ? "text-[12px]" : "text-[15px]")}>
-            <span className="uppercase tracking-wider font-semibold text-black/70 text-[0.85em]">Mob - </span>{" "}
-            <span className="font-mono font-semibold tracking-wide">
+          <div
+            className={
+              "mt-auto pt-2 " + (isCompact ? "text-[13px]" : "text-[18px]")
+            }
+          >
+            <span className="font-bold tracking-[0.15em] text-black/70 text-[0.8em]">
+              MOB
+            </span>{" "}
+            <span
+              className="font-semibold tracking-wide"
+              style={{ fontFamily: monoStack }}
+            >
               {label.receiver_mobile_1}
               {label.receiver_mobile_2 ? `, ${label.receiver_mobile_2}` : ""}
             </span>
           </div>
         </div>
 
-        {/* QR block — occupies the top-right corner properly */}
+        {/* QR block */}
         <div className="flex flex-col items-center shrink-0">
-          <div className="bg-white p-1.5 border border-black">
+          <div className="bg-white p-1.5 border-2 border-black">
             <QRCodeSVG
               value={getQrPayload(label.courier_name, label.tracking_id)}
               size={qrSize}
@@ -89,7 +114,8 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
           </div>
           <div
             className={
-              "text-center mt-1 font-semibold uppercase tracking-wider " + (isCompact ? "text-[8px]" : "text-[11px]")
+              "text-center mt-1 font-bold uppercase tracking-[0.2em] " +
+              (isCompact ? "text-[8px]" : "text-[11px]")
             }
           >
             Scan QR for Tracking
@@ -97,44 +123,52 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
         </div>
       </div>
 
-      {/* Shipment info — Courier and AWB centered on their own lines */}
-      <div className={"mt-1 pt-1 text-center " + (isCompact ? "text-[11px]" : "text-sm")}>
-        <div className="flex items-baseline justify-center gap-1.5">
-          <span className="uppercase tracking-wider font-semibold">Courier:</span>
-          <span className="font-bold">{label.courier_name}</span>
+      {/* Bottom: courier + AWB + barcode */}
+      <div className={"mt-2 text-center " + (isCompact ? "text-[12px]" : "text-[17px]")}>
+        <div className="flex items-baseline justify-center gap-2">
+          <span className="uppercase tracking-[0.15em] font-bold text-black/70 text-[0.85em]">
+            Courier:
+          </span>
+          <span className="font-extrabold tracking-tight">{label.courier_name}</span>
         </div>
-        <div className="flex items-baseline justify-center gap-1.5 mt-0.5">
-          <span className="uppercase tracking-wider font-semibold">AWB:</span>
-          <span className={"font-mono font-bold tracking-wider " + (isCompact ? "text-[13px]" : "text-lg")}>
+        <div className="flex items-baseline justify-center gap-2 mt-1">
+          <span className="uppercase tracking-[0.15em] font-bold text-black/70 text-[0.85em]">
+            AWB:
+          </span>
+          <span
+            className={"font-bold tracking-wider " + (isCompact ? "text-[14px]" : "text-[20px]")}
+            style={{ fontFamily: monoStack }}
+          >
             {label.tracking_id}
           </span>
         </div>
         {label.order_reference ? (
-          <div className="mt-0.5">
-            <span className="uppercase tracking-wider font-semibold">Order Ref:</span>{" "}
-            <span className="font-medium">{label.order_reference}</span>
+          <div className="mt-1">
+            <span className="uppercase tracking-[0.15em] font-bold text-black/70 text-[0.85em]">
+              Order Ref:
+            </span>{" "}
+            <span className="font-semibold">{label.order_reference}</span>
+          </div>
+        ) : null}
+
+        {canRenderBarcode ? (
+          <div className="mt-2 flex justify-center items-center">
+            <Barcode
+              value={trackingForBarcode}
+              format="CODE128"
+              height={barcodeHeight}
+              width={barcodeWidth}
+              fontSize={barcodeFontSize}
+              margin={0}
+              displayValue
+              background="#ffffff"
+              lineColor="#000000"
+              textAlign="center"
+              font={monoStack}
+            />
           </div>
         ) : null}
       </div>
-
-      {/* Barcode — centered directly below AWB */}
-      {canRenderBarcode ? (
-        <div className="mt-1 flex justify-center items-center">
-          <Barcode
-            value={trackingForBarcode}
-            format="CODE128"
-            height={barcodeHeight}
-            width={barcodeWidth}
-            fontSize={barcodeFontSize}
-            margin={0}
-            displayValue
-            background="#ffffff"
-            lineColor="#000000"
-            textAlign="center"
-            font="'Inter', 'Helvetica Neue', Arial, sans-serif"
-          />
-        </div>
-      ) : null}
     </div>
   );
 }

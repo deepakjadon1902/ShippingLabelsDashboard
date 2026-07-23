@@ -49,8 +49,8 @@ export function getTrackingUrl(courier: string, trackingId: string): string | nu
   return fn ? fn(trackingId) : null;
 }
 
-export function getQrPayload(courier: string, trackingId: string): string {
-  return getTrackingUrl(courier, trackingId) ?? trackingId;
+export function getQrPayload(_courier: string, trackingId: string): string {
+  return trackingId;
 }
 
 // --- API ---

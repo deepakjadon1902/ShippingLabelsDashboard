@@ -1,4 +1,5 @@
 import { QRCodeSVG } from "qrcode.react";
+import Barcode from "react-barcode";
 import type { Label } from "@/lib/labels";
 import { getQrPayload } from "@/lib/labels";
 
@@ -9,7 +10,13 @@ interface Props {
 
 export function ShippingLabel({ label, size = "compact" }: Props) {
   const isCompact = size === "compact";
-  const qrSize = isCompact ? 84 : 180;
+  const qrSize = isCompact ? 92 : 150;
+  const barcodeHeight = isCompact ? 38 : 60;
+  const barcodeWidth = isCompact ? 1.4 : 2;
+  const barcodeFontSize = isCompact ? 10 : 14;
+
+  const trackingForBarcode = (label.tracking_id || "").trim();
+  const canRenderBarcode = trackingForBarcode.length > 0 && trackingForBarcode !== "—";
 
   return (
     <div
@@ -72,7 +79,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
           </div>
         </div>
 
-        <div className="flex flex-col items-center justify-end shrink-0">
+        <div className="flex flex-col items-end justify-end shrink-0">
           <div className="bg-white p-1 border border-black">
             <QRCodeSVG
               value={getQrPayload(label.courier_name, label.tracking_id)}
@@ -81,11 +88,27 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
               includeMargin={false}
             />
           </div>
-          <div className={"text-center mt-1 " + (isCompact ? "text-[8px]" : "text-xs")}>
+          <div className={"text-center mt-0.5 " + (isCompact ? "text-[8px]" : "text-xs")}>
             Scan QR for Tracking ID
           </div>
         </div>
       </div>
+
+      {canRenderBarcode ? (
+        <div className="mt-2 pt-1 border-t border-black flex justify-center items-center">
+          <Barcode
+            value={trackingForBarcode}
+            format="CODE128"
+            height={barcodeHeight}
+            width={barcodeWidth}
+            fontSize={barcodeFontSize}
+            margin={0}
+            displayValue
+            background="#ffffff"
+            lineColor="#000000"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

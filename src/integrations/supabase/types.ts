@@ -14,7 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      labels: {
+        Row: {
+          courier_name: string
+          created_at: string
+          id: string
+          notes: string | null
+          order_reference: string | null
+          receiver_address_line1: string
+          receiver_address_line2: string | null
+          receiver_city: string
+          receiver_mobile_1: string
+          receiver_mobile_2: string | null
+          receiver_name: string
+          receiver_pincode: string
+          receiver_state: string
+          status: string
+          tracking_id: string
+        }
+        Insert: {
+          courier_name: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          order_reference?: string | null
+          receiver_address_line1: string
+          receiver_address_line2?: string | null
+          receiver_city: string
+          receiver_mobile_1: string
+          receiver_mobile_2?: string | null
+          receiver_name: string
+          receiver_pincode: string
+          receiver_state: string
+          status?: string
+          tracking_id: string
+        }
+        Update: {
+          courier_name?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          order_reference?: string | null
+          receiver_address_line1?: string
+          receiver_address_line2?: string | null
+          receiver_city?: string
+          receiver_mobile_1?: string
+          receiver_mobile_2?: string | null
+          receiver_name?: string
+          receiver_pincode?: string
+          receiver_state?: string
+          status?: string
+          tracking_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

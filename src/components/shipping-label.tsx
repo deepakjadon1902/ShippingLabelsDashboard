@@ -105,7 +105,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
       {/* Shipment info — Courier and AWB centered on their own lines */}
       <div
         className={
-          "mt-2 pt-1.5 border-t border-black text-center " +
+          "mt-1 pt-1 border-t border-black text-center " +
           (isCompact ? "text-[11px]" : "text-sm")
         }
       >
@@ -132,9 +132,9 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
         ) : null}
       </div>
 
-      {/* Barcode — centered below AWB */}
+      {/* Barcode — centered directly below AWB */}
       {canRenderBarcode ? (
-        <div className="mt-auto pt-2 flex justify-center items-center">
+        <div className="mt-1 flex justify-center items-center">
           <Barcode
             value={trackingForBarcode}
             format="CODE128"

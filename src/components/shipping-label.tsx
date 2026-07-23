@@ -113,7 +113,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
       {/* Shipment info — Courier and AWB centered on their own lines */}
       <div
         className={
-          "mt-1 pt-1 border-t border-black text-center " +
+          "mt-1 pt-1 text-center " +
           (isCompact ? "text-[11px]" : "text-sm")
         }
       >

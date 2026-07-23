@@ -157,8 +157,8 @@
 
   /* One label page — sized to A4 minus @page margins. */
   .print-page {
-    width: 100%;
-    height: 277mm; /* 297mm - 2*10mm */
+    width: 190mm; /* 210mm - 2*10mm */
+    height: 275mm; /* 297mm - 2*10mm, with a 2mm safety buffer */
     box-sizing: border-box;
     page-break-after: always;
     break-after: page;

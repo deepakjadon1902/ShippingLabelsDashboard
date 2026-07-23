@@ -37,7 +37,7 @@ export const STATUSES: LabelStatus[] = ["Pending", "Shipped", "Delivered", "RTO"
 const TRACKING_URLS: Record<string, (id: string) => string> = {
   Delhivery: (id) => `https://www.delhivery.com/tracking?tracking_id=${id}`,
   "Shree Maruti Courier": (id) => `https://www.shreemaruti.com/tracking?awb=${id}`,
-  DTDC: (id) => `https://www.dtdc.com/tracking?awbNo=${id}`,
+  DTDC: (id) => `https://www.dtdc.in/tracking.asp?strCnno=${id}`,
   Xpressbees: (id) => `https://www.xpressbees.com/track?awb=${id}`,
   "Ecom Express": (id) => `https://ecomexpress.in/tracking/?awb_field=${id}`,
   Shadowfax: (id) => `https://tracker.shadowfax.in/#/tracking/${id}`,

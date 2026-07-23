@@ -22,8 +22,8 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
     <div
       className={
         (isCompact
-          ? "print-label text-black bg-white text-[11px] leading-tight"
-          : "print-label-full text-black bg-white text-base leading-snug") +
+          ? "print-label text-black bg-white text-[11px] leading-tight p-2.5"
+          : "print-label-full text-black bg-white text-base leading-snug p-5") +
         " border border-dashed border-black flex flex-col h-full w-full"
       }
       style={{

@@ -10,7 +10,7 @@ interface Props {
 
 export function ShippingLabel({ label, size = "compact" }: Props) {
   const isCompact = size === "compact";
-  const qrSize = isCompact ? 118 : 190;
+  const qrSize = isCompact ? 84 : 132;
   const barcodeHeight = isCompact ? 40 : 62;
   const barcodeWidth = isCompact ? 1.5 : 2.2;
   const barcodeFontSize = isCompact ? 11 : 15;

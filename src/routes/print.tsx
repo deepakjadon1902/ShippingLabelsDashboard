@@ -219,18 +219,25 @@ function PrintPage() {
         </div>
       </div>
 
-      {/* Print area */}
-      <div className="print-area hidden">
+      {/* Print area — kept in the DOM (off-screen) so QR/barcode SVGs
+          render before print, then shown by @media print CSS. */}
+      <div className="print-area" aria-hidden>
         {effectiveLayout === "grid"
           ? pages.map((page, pi) => (
-              <div key={pi} className="print-grid">
+              <div key={pi} className="print-page print-grid">
                 {page.map((l) => (
-                  <ShippingLabel key={l.id} label={l} size="compact" />
+                  <div key={l.id} className="print-cell">
+                    <ShippingLabel label={l} size="compact" />
+                  </div>
                 ))}
               </div>
             ))
-          : selectedLabels.map((l) => (
-              <div key={l.id} className="print-label-full">
+          : selectedLabels.map((l, i) => (
+              <div
+                key={l.id}
+                className="print-page print-page-single"
+                data-last={i === selectedLabels.length - 1 ? "true" : undefined}
+              >
                 <ShippingLabel label={l} size="full" />
               </div>
             ))}

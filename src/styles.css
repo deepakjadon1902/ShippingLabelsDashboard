@@ -120,14 +120,27 @@
 }
 
 /* ============ Print styles for shipping labels ============ */
+
+/* Keep print DOM in the tree (so QR/barcode SVGs render) but off-screen. */
+.print-area {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 210mm;
+  pointer-events: none;
+}
+
 @media print {
   @page {
     size: A4;
     margin: 10mm;
   }
 
+  html,
   body {
     background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   .no-print,
@@ -136,37 +149,76 @@
   }
 
   .print-area {
+    position: static !important;
+    left: auto !important;
+    width: auto !important;
     display: block !important;
   }
 
+  /* One label page — sized to A4 minus @page margins. */
+  .print-page {
+    width: 100%;
+    height: 277mm; /* 297mm - 2*10mm */
+    box-sizing: border-box;
+    page-break-after: always;
+    break-after: page;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    overflow: hidden;
+  }
+  .print-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  /* 4-up grid layout. */
   .print-grid {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
     gap: 6mm;
+  }
+
+  .print-cell {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    display: flex;
+  }
+
+  /* Single full-page label. */
+  .print-page-single {
+    padding: 6mm;
+  }
+
+  /* The label component itself. */
+  .print-label,
+  .print-label-full {
     width: 100%;
-    height: calc(297mm - 20mm);
-    page-break-after: always;
-  }
-
-  .print-grid:last-child {
-    page-break-after: auto;
-  }
-
-  .print-label {
+    height: 100%;
+    box-sizing: border-box;
     border: 1px dashed #000 !important;
     background: white !important;
     color: black !important;
-    padding: 6mm;
+    padding: 4mm;
     overflow: hidden;
+    page-break-inside: avoid;
     break-inside: avoid;
   }
 
   .print-label-full {
-    width: 100%;
-    height: calc(297mm - 20mm);
-    border: 1px dashed #000 !important;
-    padding: 12mm;
-    page-break-after: always;
+    padding: 10mm;
+  }
+
+  /* Preserve QR + barcode blacks exactly. */
+  .print-label svg,
+  .print-label-full svg,
+  .print-area svg {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
   }
 }
+

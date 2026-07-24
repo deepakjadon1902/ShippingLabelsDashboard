@@ -26,6 +26,7 @@ export const AUTO_TRACK_COURIERS = new Set<string>([
 export function mapStatus(rawInput: string | null | undefined): InternalStatus | null {
   if (!rawInput) return null;
   const raw = rawInput.toLowerCase();
+  if (raw === "pending" || raw.includes("pending001")) return "Pending";
   if (
     raw.includes("deliver") &&
     !raw.includes("undeliver") &&
@@ -52,8 +53,7 @@ export function mapStatus(rawInput: string | null | undefined): InternalStatus |
     raw.includes("manifested") ||
     raw.includes("info received") ||
     raw.includes("inforeceived") ||
-    raw.includes("available_for_pickup") ||
-    raw.includes("pending")
+    raw.includes("available_for_pickup")
   )
     return "Shipped";
   return null;
@@ -81,12 +81,18 @@ export async function fetchDelhivery(waybill: string): Promise<TrackingResult> {
     );
     if (!res.ok) return { internalStatus: null, rawStatus: null, error: `Delhivery ${res.status}` };
     const data = (await res.json()) as {
+      Success?: boolean;
+      Error?: string;
+      rmk?: string;
       ShipmentData?: Array<{
         Shipment?: {
           Status?: { Status?: string; StatusType?: string; Instructions?: string };
         };
       }>;
     };
+    if (data.Success === false || data.Error) {
+      return { internalStatus: null, rawStatus: null, error: data.Error || data.rmk || "Delhivery no status" };
+    }
     const shipment = data.ShipmentData?.[0]?.Shipment?.Status;
     const raw = shipment?.Status || shipment?.Instructions || shipment?.StatusType || null;
     return { internalStatus: mapStatus(raw), rawStatus: raw, error: raw ? null : "No status in response" };
@@ -152,11 +158,11 @@ export async function trackingMoreRegister(
       },
       body: JSON.stringify({ tracking_number: waybill, courier_code: slug }),
     });
-    // 200 created, 4218 already exists — both OK
-    const data = (await res.json().catch(() => ({}))) as { code?: number; meta?: { code?: number }; message?: string };
+    // 200/201 created, 4101/4218 already exists — all OK for the two-step flow.
+    const data = (await res.json().catch(() => ({}))) as { code?: number; meta?: { code?: number; message?: string }; message?: string };
     const code = data.code ?? data.meta?.code ?? res.status;
-    if (code === 200 || code === 201 || code === 4218 || res.ok) return { ok: true, error: null };
-    return { ok: false, error: data.message || `TrackingMore create ${code}` };
+    if (code === 200 || code === 201 || code === 4101 || code === 4218 || res.ok) return { ok: true, error: null };
+    return { ok: false, error: data.meta?.message || data.message || `TrackingMore create ${code}` };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -171,18 +177,21 @@ export async function fetchTrackingMore(
   if (!key) return { internalStatus: null, rawStatus: null, error: "Missing TRACKINGMORE_API_KEY" };
   if (!slug) return { internalStatus: null, rawStatus: null, error: `No TM slug for ${courierName}` };
   try {
+    const registered = await trackingMoreRegister(courierName, waybill);
+    if (!registered.ok) {
+      return { internalStatus: null, rawStatus: null, error: registered.error || "TrackingMore create failed" };
+    }
     const url = `${TM_BASE}/trackings/get?tracking_numbers=${encodeURIComponent(waybill)}&courier_code=${slug}`;
     const res = await fetch(url, { headers: { "Tracking-Api-Key": key } });
     const data = (await res.json().catch(() => ({}))) as {
       data?: Array<{ delivery_status?: string; latest_event?: string; status_info?: string }>;
+      meta?: { code?: number; message?: string };
       message?: string;
     };
-    if (!res.ok) return { internalStatus: null, rawStatus: null, error: data.message || `TrackingMore ${res.status}` };
+    if (!res.ok) return { internalStatus: null, rawStatus: null, error: data.meta?.message || data.message || `TrackingMore ${res.status}` };
     const first = data.data?.[0];
     if (!first) {
-      // Not yet registered — try to register then note as pending
-      await trackingMoreRegister(courierName, waybill);
-      return { internalStatus: null, rawStatus: null, error: "Not yet tracked; registered now" };
+      return { internalStatus: null, rawStatus: null, error: "TrackingMore returned no tracking data after create" };
     }
     const raw = first.delivery_status || first.latest_event || first.status_info || null;
     return { internalStatus: mapStatus(raw), rawStatus: raw, error: raw ? null : "No status yet" };

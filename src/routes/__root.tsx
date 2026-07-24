@@ -5,7 +5,6 @@ import {
   useRouter,
   HeadContent,
   Scripts,
-  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -58,10 +57,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Shipping Label Dashboard" },
-      { name: "description", content: "Manage and print shipping labels for your devotional products ecommerce business." },
-      { property: "og:title", content: "Shipping Label Dashboard" },
-      { property: "og:description", content: "Create, track and print shipping labels for any courier." },
+      { title: "ShippingLavelGenrator" },
+      { name: "description", content: "ShippingLavelGenrator" },
+      { property: "og:title", content: "ShippingLavelGenrator" },
+      { property: "og:description", content: "ShippingLavelGenrator" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -94,18 +93,7 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 function PageTitle() {
-  const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const title =
-    pathname === "/"
-      ? "Dashboard"
-      : pathname.startsWith("/create")
-        ? "Create Label"
-        : pathname.startsWith("/print")
-          ? "Print Labels"
-          : pathname.startsWith("/edit")
-            ? "Edit Label"
-            : "";
-  return <h1 className="text-base font-semibold">{title}</h1>;
+  return <h1 className="text-base font-semibold">ShippingLavelGenrator</h1>;
 }
 
 function RootComponent() {

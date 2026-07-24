@@ -6,7 +6,7 @@ export function AppLogo({ className = "h-9 w-9" }: AppLogoProps) {
   return (
     <img
       src="/app-logo.svg"
-      alt="Shipping Label Dashboard"
+      alt="ShippingLavelGenrator"
       className={className}
       width="36"
       height="36"

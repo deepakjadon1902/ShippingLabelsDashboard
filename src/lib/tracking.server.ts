@@ -12,7 +12,7 @@ export const TRACKINGMORE_SLUGS: Record<string, string> = {
   // only source for Shree Maruti (no direct tracking API).
   Delhivery: "delhivery",
   DTDC: "dtdc",
-  "Shree Maruti Courier": "shree-maruti",
+  "Shree Maruti Courier": "shreemaruticourier",
 };
 
 // Couriers we auto-refresh. Shree Maruti is included via TrackingMore; manual
@@ -239,10 +239,15 @@ export async function fetchTrackingForCourier(
   // TrackingMore-only couriers (Shadowfax, Xpressbees, Ecom Express, India Post, Shree Maruti).
   if (TRACKINGMORE_SLUGS[courierName]) {
     const r = await fetchTrackingMore(courierName, waybill);
+    if (r.internalStatus) {
+      return { ...r, rawStatus: tagSource(r.rawStatus, "trackingmore"), source: "trackingmore" };
+    }
+    // Friendly fallback for couriers where TM coverage is spotty (e.g. Shree Maruti).
     return {
-      ...r,
-      rawStatus: r.internalStatus ? tagSource(r.rawStatus, "trackingmore") : r.rawStatus,
-      source: r.internalStatus ? "trackingmore" : "none",
+      internalStatus: null,
+      rawStatus: null,
+      error: "Auto-tracking unavailable — manual only",
+      source: "none",
     };
   }
   return { internalStatus: null, rawStatus: null, error: `No tracking API for ${courierName}`, source: "none" };

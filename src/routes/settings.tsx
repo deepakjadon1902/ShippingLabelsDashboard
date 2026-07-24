@@ -1,19 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useState } from "react";
 import { CheckCircle2, XCircle, KeyRound } from "lucide-react";
+import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label as UILabel } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { ShippingLabel } from "@/components/shipping-label";
+import type { Label as ShipLabel } from "@/lib/labels";
 import { getTrackingCredsStatus } from "@/lib/tracking.functions";
+import { useSenderProfiles, type SenderProfile } from "@/lib/settings";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
     meta: [
-      { title: "Settings — Courier API Credentials" },
-      { name: "description", content: "Configure Delhivery, DTDC and TrackingMore API keys for automatic tracking updates." },
-      { property: "og:title", content: "Settings — Courier API Credentials" },
-      { property: "og:description", content: "Manage your courier tracking API keys." },
+      { title: "Settings — Sender Profiles & Courier APIs" },
+      { name: "description", content: "Manage return-address profiles and courier tracking API keys." },
+      { property: "og:title", content: "Settings — Sender Profiles & Courier APIs" },
+      { property: "og:description", content: "Manage return-address profiles and courier tracking API keys." },
     ],
   }),
   component: SettingsPage,
@@ -42,6 +51,55 @@ function CredRow({ label, configured, note }: { label: string; configured: boole
   );
 }
 
+function SenderEditor({
+  title,
+  value,
+  onChange,
+}: {
+  title: string;
+  value: SenderProfile;
+  onChange: (v: SenderProfile) => void;
+}) {
+  function set<K extends keyof SenderProfile>(key: K, v: SenderProfile[K]) {
+    onChange({ ...value, [key]: v });
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1.5">
+          <UILabel className="text-xs">Company name</UILabel>
+          <Input value={value.name} onChange={(e) => set("name", e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <UILabel className="text-xs">Full address</UILabel>
+          <Textarea rows={3} value={value.address} onChange={(e) => set("address", e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <UILabel className="text-xs">Phone</UILabel>
+            <Input value={value.phone} onChange={(e) => set("phone", e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <UILabel className="text-xs">Website</UILabel>
+            <Input value={value.website} onChange={(e) => set("website", e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <UILabel className="text-xs">Google Review link</UILabel>
+          <Input
+            value={value.review_url}
+            placeholder="https://g.page/r/xxxxxxxx/review"
+            onChange={(e) => set("review_url", e.target.value)}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SettingsPage() {
   const fetchCreds = useServerFn(getTrackingCredsStatus);
   const { data, isLoading } = useQuery({
@@ -49,14 +107,113 @@ function SettingsPage() {
     queryFn: () => fetchCreds(),
   });
 
+  const [profiles, saveProfiles] = useSenderProfiles();
+  const [draft, setDraft] = useState<[SenderProfile, SenderProfile]>(profiles);
+  const [previewIdx, setPreviewIdx] = useState<0 | 1>(0);
+
+  // Keep the draft in sync when profiles change from another tab.
+  // Simple approach: reset draft to persisted whenever we mount.
+  // (We're not using useEffect to avoid overwriting user edits on save.)
+
+  const previewSender = draft[previewIdx];
+  const previewLabel: ShipLabel = {
+    id: "preview",
+    created_at: new Date().toISOString(),
+    receiver_name: "Ramesh Kumar",
+    receiver_address_line1: "12, Radha Nagar, Near Iskcon Temple",
+    receiver_address_line2: "Opp. Central Park",
+    receiver_city: "Vrindavan",
+    receiver_state: "Uttar Pradesh",
+    receiver_pincode: "281121",
+    receiver_mobile_1: "9876543210",
+    receiver_mobile_2: null,
+    courier_name: "Delhivery",
+    tracking_id: "1234567890",
+    order_reference: "SRG-0001",
+    status: "Pending",
+    notes: null,
+    sender_name: previewSender.name || null,
+    sender_address: previewSender.address || null,
+    sender_phone: previewSender.phone || null,
+    sender_website: previewSender.website || null,
+    sender_review_url: previewSender.review_url || null,
+  };
+
+  function handleSave() {
+    saveProfiles(draft);
+    toast.success("Sender profiles saved");
+  }
+
+  function handleReset() {
+    setDraft(profiles);
+  }
+
   return (
-    <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-6">
+    <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold">Courier API Settings</h2>
+        <h2 className="text-2xl font-semibold">Settings</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          API keys are stored as encrypted server secrets — never exposed to the browser.
+          Manage sender return-address profiles and courier tracking API keys.
         </p>
       </div>
+
+      <section className="space-y-3">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Sender profiles</h3>
+            <p className="text-sm text-muted-foreground">
+              Save two return addresses. Pick one on each label. Past labels keep their snapshot.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={handleReset}>Reset</Button>
+            <Button onClick={handleSave}>Save profiles</Button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <SenderEditor
+            title="Profile 1"
+            value={draft[0]}
+            onChange={(v) => setDraft([v, draft[1]])}
+          />
+          <SenderEditor
+            title="Profile 2"
+            value={draft[1]}
+            onChange={(v) => setDraft([draft[0], v])}
+          />
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Sample label preview</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant={previewIdx === 0 ? "default" : "outline"}
+                onClick={() => setPreviewIdx(0)}
+              >
+                Preview with Profile 1
+              </Button>
+              <Button
+                size="sm"
+                variant={previewIdx === 1 ? "default" : "outline"}
+                onClick={() => setPreviewIdx(1)}
+              >
+                Preview with Profile 2
+              </Button>
+            </div>
+            <div className="w-full max-w-md">
+              <ShippingLabel label={previewLabel} size="compact" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Save profiles above to lock in changes. The preview updates live as you edit.
+            </p>
+          </CardContent>
+        </Card>
+      </section>
 
       <Card>
         <CardHeader>
@@ -80,20 +237,8 @@ function SettingsPage() {
               <CredRow
                 label="TrackingMore API key"
                 configured={!!data?.trackingmore}
-                note="Unified tracker for Shadowfax, Xpressbees, Ecom Express, India Post."
+                note="Unified tracker for Shadowfax, Xpressbees, Ecom Express, India Post, Shree Maruti."
               />
-              <div className="flex items-start justify-between gap-4 py-3 border-t mt-2">
-                <div className="flex items-start gap-3">
-                  <KeyRound className="h-4 w-4 mt-1 text-muted-foreground" />
-                  <div>
-                    <div className="font-medium">Shree Maruti Courier</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      No tracking API available — status must be updated manually from the dashboard.
-                    </div>
-                  </div>
-                </div>
-                <Badge variant="outline">Manual only</Badge>
-              </div>
             </>
           )}
         </CardContent>
@@ -112,35 +257,8 @@ function SettingsPage() {
           </p>
           <p>
             Automatic refresh runs at <strong>09:00 IST</strong> and <strong>18:00 IST</strong> daily.
-            Only labels whose status is not Delivered or RTO are processed. Shree Maruti Courier
-            labels are always skipped.
+            Only labels whose status is not Delivered or RTO are processed.
           </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Where to get each key</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm space-y-3 text-muted-foreground">
-          <div>
-            <strong className="text-foreground">Delhivery</strong> — From your Delhivery One /
-            client dashboard: Settings → API → Production Token. Confirm the correct token with
-            your developer (Deepak) since checkout is already integrated.
-          </div>
-          <div>
-            <strong className="text-foreground">DTDC</strong> — Provided by your DTDC account
-            manager. Ask for the tracking API access token (api-key header value).
-          </div>
-          <div>
-            <strong className="text-foreground">TrackingMore</strong> — Sign up at{" "}
-            <a className="underline" href="https://www.trackingmore.com" target="_blank" rel="noreferrer">
-              trackingmore.com
-            </a>
-            . Go to <em>User Center → API Key</em> and copy the key. New tracking numbers for
-            Shadowfax / Xpressbees / Ecom Express / India Post are automatically registered when
-            you create the label.
-          </div>
         </CardContent>
       </Card>
     </div>

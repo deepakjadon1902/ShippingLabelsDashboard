@@ -245,6 +245,7 @@ function Dashboard() {
                   <TableHead>Courier</TableHead>
                   <TableHead>Tracking ID</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Last update</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -252,13 +253,13 @@ function Dashboard() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                       Loading…
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                       No labels found.
                     </TableCell>
                   </TableRow>
@@ -269,6 +270,8 @@ function Dashboard() {
                       label={l}
                       onStatusChange={(status) => statusMutation.mutate({ id: l.id, status })}
                       onDelete={() => setDeleteId(l.id)}
+                      onRefresh={() => refreshOneMutation.mutate(l.id)}
+                      refreshing={refreshOneMutation.isPending && refreshOneMutation.variables === l.id}
                     />
                   ))
                 )}

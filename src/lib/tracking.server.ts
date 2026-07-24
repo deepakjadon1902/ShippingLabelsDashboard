@@ -191,13 +191,55 @@ export async function fetchTrackingMore(
   }
 }
 
-// ---------------- Router ----------------
+// ---------------- Router with fallback ----------------
+export type TrackingSource = "direct" | "trackingmore" | "none";
+export interface TrackingResultWithSource extends TrackingResult {
+  source: TrackingSource;
+}
+
 export async function fetchTrackingForCourier(
   courierName: string,
   waybill: string,
-): Promise<TrackingResult> {
-  if (courierName === "Delhivery") return fetchDelhivery(waybill);
-  if (courierName === "DTDC") return fetchDTDC(waybill);
-  if (TRACKINGMORE_SLUGS[courierName]) return fetchTrackingMore(courierName, waybill);
-  return { internalStatus: null, rawStatus: null, error: `No tracking API for ${courierName}` };
+): Promise<TrackingResultWithSource> {
+  const isDelhivery = courierName === "Delhivery";
+  const isDTDC = courierName === "DTDC";
+
+  // Step 1: Try the direct courier API for Delhivery / DTDC first.
+  if (isDelhivery || isDTDC) {
+    const direct = isDelhivery ? await fetchDelhivery(waybill) : await fetchDTDC(waybill);
+    if (direct.internalStatus) {
+      return { ...direct, rawStatus: tagSource(direct.rawStatus, "direct"), source: "direct" };
+    }
+    // Step 2: Direct failed or returned no mappable status — try TrackingMore fallback.
+    if (TRACKINGMORE_SLUGS[courierName]) {
+      const fb = await fetchTrackingMore(courierName, waybill);
+      if (fb.internalStatus) {
+        return { ...fb, rawStatus: tagSource(fb.rawStatus, "trackingmore"), source: "trackingmore" };
+      }
+      // Both failed — surface the more informative error.
+      return {
+        internalStatus: null,
+        rawStatus: null,
+        error: `direct: ${direct.error ?? "no status"} | trackingmore: ${fb.error ?? "no status"}`,
+        source: "none",
+      };
+    }
+    return { ...direct, source: "none" };
+  }
+
+  // TrackingMore-only couriers (Shadowfax, Xpressbees, Ecom Express, India Post, Shree Maruti).
+  if (TRACKINGMORE_SLUGS[courierName]) {
+    const r = await fetchTrackingMore(courierName, waybill);
+    return {
+      ...r,
+      rawStatus: r.internalStatus ? tagSource(r.rawStatus, "trackingmore") : r.rawStatus,
+      source: r.internalStatus ? "trackingmore" : "none",
+    };
+  }
+  return { internalStatus: null, rawStatus: null, error: `No tracking API for ${courierName}`, source: "none" };
+}
+
+function tagSource(raw: string | null, source: TrackingSource): string | null {
+  if (!raw) return raw;
+  return `[${source}] ${raw}`;
 }

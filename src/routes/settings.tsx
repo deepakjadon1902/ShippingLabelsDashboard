@@ -51,14 +51,69 @@ function CredRow({ label, configured, note }: { label: string; configured: boole
   );
 }
 
+function FieldRow({
+  label,
+  value,
+  saved,
+  onChange,
+  onSave,
+  multiline,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  saved: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  multiline?: boolean;
+  placeholder?: string;
+}) {
+  const dirty = value !== saved;
+  return (
+    <div className="space-y-1.5">
+      <UILabel className="text-xs">{label}</UILabel>
+      <div className="flex gap-2 items-start">
+        {multiline ? (
+          <Textarea
+            rows={3}
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            className="flex-1"
+          />
+        ) : (
+          <Input
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+            className="flex-1"
+          />
+        )}
+        <Button
+          size="sm"
+          variant={dirty ? "default" : "outline"}
+          disabled={!dirty}
+          onClick={onSave}
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function SenderEditor({
   title,
   value,
   onChange,
+  onSaveField,
+  saved,
 }: {
   title: string;
   value: SenderProfile;
   onChange: (v: SenderProfile) => void;
+  onSaveField: (key: keyof SenderProfile) => void;
+  saved: SenderProfile;
 }) {
   function set<K extends keyof SenderProfile>(key: K, v: SenderProfile[K]) {
     onChange({ ...value, [key]: v });
@@ -69,32 +124,43 @@ function SenderEditor({
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="space-y-1.5">
-          <UILabel className="text-xs">Company name</UILabel>
-          <Input value={value.name} onChange={(e) => set("name", e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <UILabel className="text-xs">Full address</UILabel>
-          <Textarea rows={3} value={value.address} onChange={(e) => set("address", e.target.value)} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <UILabel className="text-xs">Phone</UILabel>
-            <Input value={value.phone} onChange={(e) => set("phone", e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <UILabel className="text-xs">Website</UILabel>
-            <Input value={value.website} onChange={(e) => set("website", e.target.value)} />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <UILabel className="text-xs">Google Review link</UILabel>
-          <Input
-            value={value.review_url}
-            placeholder="https://g.page/r/xxxxxxxx/review"
-            onChange={(e) => set("review_url", e.target.value)}
-          />
-        </div>
+        <FieldRow
+          label="Company name"
+          value={value.name}
+          saved={saved.name}
+          onChange={(v) => set("name", v)}
+          onSave={() => onSaveField("name")}
+        />
+        <FieldRow
+          label="Full address"
+          multiline
+          value={value.address}
+          saved={saved.address}
+          onChange={(v) => set("address", v)}
+          onSave={() => onSaveField("address")}
+        />
+        <FieldRow
+          label="Phone"
+          value={value.phone}
+          saved={saved.phone}
+          onChange={(v) => set("phone", v)}
+          onSave={() => onSaveField("phone")}
+        />
+        <FieldRow
+          label="Website"
+          value={value.website}
+          saved={saved.website}
+          onChange={(v) => set("website", v)}
+          onSave={() => onSaveField("website")}
+        />
+        <FieldRow
+          label="Google Review link"
+          value={value.review_url}
+          saved={saved.review_url}
+          placeholder="https://g.page/r/xxxxxxxx/review"
+          onChange={(v) => set("review_url", v)}
+          onSave={() => onSaveField("review_url")}
+        />
       </CardContent>
     </Card>
   );
@@ -162,12 +228,12 @@ function SettingsPage() {
           <div>
             <h3 className="text-lg font-semibold">Sender profiles</h3>
             <p className="text-sm text-muted-foreground">
-              Save two return addresses. Pick one on each label. Past labels keep their snapshot.
+              Edit any field and click its Save button. Past labels keep their snapshot.
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={handleReset}>Reset</Button>
-            <Button onClick={handleSave}>Save profiles</Button>
+            <Button variant="ghost" onClick={handleReset}>Discard changes</Button>
+            <Button onClick={handleSave}>Save all</Button>
           </div>
         </div>
 
@@ -175,14 +241,33 @@ function SettingsPage() {
           <SenderEditor
             title="Profile 1"
             value={draft[0]}
+            saved={profiles[0]}
             onChange={(v) => setDraft([v, draft[1]])}
+            onSaveField={(key) => {
+              const next: [SenderProfile, SenderProfile] = [
+                { ...profiles[0], [key]: draft[0][key] },
+                profiles[1],
+              ];
+              saveProfiles(next);
+              toast.success(`Profile 1 · ${key} saved`);
+            }}
           />
           <SenderEditor
             title="Profile 2"
             value={draft[1]}
+            saved={profiles[1]}
             onChange={(v) => setDraft([draft[0], v])}
+            onSaveField={(key) => {
+              const next: [SenderProfile, SenderProfile] = [
+                profiles[0],
+                { ...profiles[1], [key]: draft[1][key] },
+              ];
+              saveProfiles(next);
+              toast.success(`Profile 2 · ${key} saved`);
+            }}
           />
         </div>
+
 
         <Card>
           <CardHeader>

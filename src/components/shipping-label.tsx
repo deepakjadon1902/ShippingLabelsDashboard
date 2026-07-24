@@ -2,30 +2,37 @@ import { QRCodeSVG } from "qrcode.react";
 import Barcode from "react-barcode";
 import type { Label } from "@/lib/labels";
 import { getQrPayload } from "@/lib/labels";
+import { useWebsiteName } from "@/lib/settings";
 
 interface Props {
   label: Label;
-  size?: "compact" | "full";
+  size?: "compact" | "full" | "mini";
 }
 
 export function ShippingLabel({ label, size = "compact" }: Props) {
-  const isCompact = size === "compact";
-  const qrSize = isCompact ? 84 : 132;
-  const barcodeHeight = isCompact ? 44 : 68;
-  const barcodeWidth = isCompact ? 1.6 : 2.4;
-  const barcodeFontSize = isCompact ? 12 : 16;
+  const [websiteName] = useWebsiteName();
+  const isFull = size === "full";
+  const isMini = size === "mini";
+
+  const qrSize = isFull ? 132 : isMini ? 62 : 84;
+  const barcodeHeight = isFull ? 68 : isMini ? 32 : 44;
+  const barcodeWidth = isFull ? 2.4 : isMini ? 1.2 : 1.6;
+  const barcodeFontSize = isFull ? 16 : isMini ? 10 : 12;
 
   const trackingForBarcode = (label.tracking_id || "").trim();
   const canRenderBarcode = trackingForBarcode.length > 0 && trackingForBarcode !== "—";
 
+  const containerClass = isFull
+    ? "print-label-full text-black bg-white text-base leading-snug p-5"
+    : isMini
+      ? "print-label text-black bg-white text-[10px] leading-tight p-2"
+      : "print-label text-black bg-white text-[11.5px] leading-tight p-2.5";
+
   return (
     <div
       className={
-        (isCompact
-          ? "print-label text-black bg-white text-[11.5px] leading-tight"
-          : "print-label-full text-black bg-white text-base leading-snug") +
-        " border border-dashed border-black flex flex-col w-full overflow-hidden " +
-        (isCompact ? "p-2.5" : "p-5")
+        containerClass +
+        " border border-dashed border-black flex flex-col w-full overflow-hidden"
       }
       style={{
         fontFamily: "'Outfit', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif",
@@ -33,23 +40,28 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
       }}
     >
       {/* Top: receiver on the left, QR neatly on the right */}
-      <div className="flex gap-3">
+      <div className={"flex " + (isMini ? "gap-2" : "gap-3")}>
         <div className="flex-1 min-w-0">
           <div
             className={
-              "font-semibold tracking-[0.2em] " +
-              (isCompact ? "text-[10px]" : "text-sm") +
-              " uppercase text-black/60"
+              "font-semibold tracking-[0.2em] uppercase text-black/60 " +
+              (isFull ? "text-sm" : isMini ? "text-[8px]" : "text-[10px]")
             }
           >
             To
           </div>
-          <div className={"font-extrabold tracking-tight leading-snug " + (isCompact ? "text-[16px]" : "text-[24px]")}>
+          <div
+            className={
+              "font-extrabold tracking-tight leading-snug " +
+              (isFull ? "text-[24px]" : isMini ? "text-[13px]" : "text-[16px]")
+            }
+          >
             {label.receiver_name}
           </div>
           <div
             className={
-              "mt-1 break-words leading-snug text-black/90 " + (isCompact ? "text-[12px]" : "text-[15.5px]")
+              "mt-1 break-words leading-snug text-black/90 " +
+              (isFull ? "text-[15.5px]" : isMini ? "text-[10px]" : "text-[12px]")
             }
           >
             {label.receiver_address_line1}
@@ -62,7 +74,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
             <br />
             {label.receiver_city}, {label.receiver_state} - <b className="tracking-wide">{label.receiver_pincode}</b>
           </div>
-          <div className={"mt-1.5 " + (isCompact ? "text-[12.5px]" : "text-[15.5px]")}>
+          <div className={"mt-1 " + (isFull ? "text-[15.5px]" : isMini ? "text-[10.5px]" : "text-[12.5px]")}>
             <span className="uppercase tracking-wider font-semibold text-black/60 text-[0.85em]">Mob - </span>{" "}
             <span className="font-semibold tracking-wide">
               {label.receiver_mobile_1}
@@ -70,7 +82,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
             </span>
           </div>
           {label.order_reference ? (
-            <div className={"mt-0.5 " + (isCompact ? "text-[12.5px]" : "text-[15.5px]")}>
+            <div className={"mt-0.5 " + (isFull ? "text-[15.5px]" : isMini ? "text-[10.5px]" : "text-[12.5px]")}>
               <span className="uppercase tracking-wider font-semibold text-black/60 text-[0.85em]">Order Ref - </span>{" "}
               <span className="font-semibold tracking-wide">{label.order_reference}</span>
             </div>
@@ -79,7 +91,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
 
         {/* QR block */}
         <div className="flex flex-col items-center shrink-0">
-          <div className="bg-white p-1.5 border border-black">
+          <div className={"bg-white border border-black " + (isMini ? "p-1" : "p-1.5")}>
             <QRCodeSVG
               value={getQrPayload(label.courier_name, label.tracking_id)}
               size={qrSize}
@@ -89,7 +101,8 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
           </div>
           <div
             className={
-              "text-center mt-1 font-semibold uppercase tracking-wider " + (isCompact ? "text-[8px]" : "text-[11px]")
+              "text-center mt-1 font-semibold uppercase tracking-wider " +
+              (isFull ? "text-[11px]" : isMini ? "text-[7px]" : "text-[8px]")
             }
           >
             Scan QR for Tracking
@@ -98,14 +111,14 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
       </div>
 
       {/* Shipment info */}
-      <div className={"text-center mt-2 " + (isCompact ? "text-[12px]" : "text-[15px]")}>
+      <div className={"text-center mt-2 " + (isFull ? "text-[15px]" : isMini ? "text-[10px]" : "text-[12px]")}>
         <div className="flex items-baseline justify-center gap-1.5">
           <span className="uppercase tracking-wider font-semibold text-black/60">Courier:</span>
           <span className="font-bold">{label.courier_name}</span>
         </div>
         <div className="flex items-baseline justify-center gap-1.5 mt-0.5">
           <span className="uppercase tracking-wider font-semibold text-black/60">AWB:</span>
-          <span className={"font-bold tracking-wider " + (isCompact ? "text-[14px]" : "text-lg")}>
+          <span className={"font-bold tracking-wider " + (isFull ? "text-lg" : isMini ? "text-[11px]" : "text-[14px]")}>
             {label.tracking_id}
           </span>
         </div>
@@ -113,7 +126,7 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
 
       {/* Barcode */}
       {canRenderBarcode ? (
-        <div className="mt-1.5 flex justify-center items-center">
+        <div className="mt-1 flex justify-center items-center">
           <Barcode
             value={trackingForBarcode}
             format="CODE128"
@@ -127,6 +140,18 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
             textAlign="center"
             font="'Outfit', 'Inter', 'Helvetica Neue', Arial, sans-serif"
           />
+        </div>
+      ) : null}
+
+      {/* Footer */}
+      {websiteName ? (
+        <div
+          className={
+            "mt-1 pt-1 border-t border-black/20 text-center font-medium tracking-wide text-black/70 " +
+            (isFull ? "text-[11px]" : isMini ? "text-[7.5px]" : "text-[9px]")
+          }
+        >
+          Thank you for your order — <span className="font-semibold text-black">{websiteName}</span>
         </div>
       ) : null}
     </div>

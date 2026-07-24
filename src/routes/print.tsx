@@ -6,6 +6,7 @@ import { Printer, ArrowLeft, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label as UILabel } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -16,7 +17,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ShippingLabel } from "@/components/shipping-label";
-import { listLabels } from "@/lib/labels";
+import { listLabels, type Label } from "@/lib/labels";
+import { useWebsiteName } from "@/lib/settings";
 
 const searchSchema = z.object({
   ids: z.string().optional(),
@@ -26,7 +28,7 @@ export const Route = createFileRoute("/print")({
   head: () => ({
     meta: [
       { title: "Print Labels — Shipping Labels" },
-      { name: "description", content: "Select labels and print them on A4 in a 4-up grid or full-page single." },
+      { name: "description", content: "Select labels and print them on A4 in flexible grid layouts." },
       { property: "og:title", content: "Print Labels — Shipping Labels" },
       { property: "og:description", content: "Print your saved shipping labels on A4." },
     ],
@@ -34,6 +36,66 @@ export const Route = createFileRoute("/print")({
   validateSearch: (search) => searchSchema.parse(search),
   component: PrintPage,
 });
+
+type LayoutKey = "single" | "grid4" | "grid8" | "half4" | "twoline";
+
+interface LayoutConfig {
+  key: LayoutKey;
+  title: string;
+  description: string;
+  perPage: number;
+  pageClass: string;
+  size: "full" | "compact" | "mini";
+}
+
+const LAYOUTS: Record<LayoutKey, LayoutConfig> = {
+  single: {
+    key: "single",
+    title: "A4 · 1 label per page",
+    description: "One label filling the full A4 page",
+    perPage: 1,
+    pageClass: "print-page-single",
+    size: "full",
+  },
+  grid4: {
+    key: "grid4",
+    title: "A4 · 4 labels per page (2×2)",
+    description: "Classic 4-up grid",
+    perPage: 4,
+    pageClass: "print-grid-4",
+    size: "compact",
+  },
+  grid8: {
+    key: "grid8",
+    title: "A4 · 8 labels per page (2×4)",
+    description: "Compact 2 columns by 4 rows",
+    perPage: 8,
+    pageClass: "print-grid-8",
+    size: "mini",
+  },
+  half4: {
+    key: "half4",
+    title: "A4 · 4 labels in half page (2×2)",
+    description: "Fills the top half of A4 tightly",
+    perPage: 4,
+    pageClass: "print-grid-half4",
+    size: "compact",
+  },
+  twoline: {
+    key: "twoline",
+    title: "A4 · 2 labels per line",
+    description: "Two side-by-side, repeating down the page",
+    perPage: 8,
+    pageClass: "print-grid-twoline",
+    size: "compact",
+  },
+};
+
+function chunk<T>(arr: T[], n: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
 
 function PrintPage() {
   const { ids } = Route.useSearch();
@@ -44,13 +106,11 @@ function PrintPage() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [layout, setLayout] = useState<"grid" | "single">("grid");
+  const [layoutKey, setLayoutKey] = useState<LayoutKey>("grid4");
+  const [websiteName, setWebsiteNameValue] = useWebsiteName();
 
-  // Preselect from ?ids= query param
   useEffect(() => {
-    if (ids) {
-      setSelected(new Set(ids.split(",").filter(Boolean)));
-    }
+    if (ids) setSelected(new Set(ids.split(",").filter(Boolean)));
   }, [ids]);
 
   const filtered = useMemo(() => {
@@ -64,7 +124,7 @@ function PrintPage() {
     );
   }, [labels, search]);
 
-  const selectedLabels = useMemo(
+  const selectedLabels: Label[] = useMemo(
     () => labels.filter((l) => selected.has(l.id)),
     [labels, selected],
   );
@@ -77,25 +137,22 @@ function PrintPage() {
       return next;
     });
   }
-
   function toggleAll() {
     if (selected.size === filtered.length) setSelected(new Set());
     else setSelected(new Set(filtered.map((l) => l.id)));
   }
 
   const canPrint = selectedLabels.length > 0;
-  const effectiveLayout: "grid" | "single" =
-    layout === "single" || selectedLabels.length === 1 ? "single" : "grid";
 
-  // Chunk into pages of 4 for grid layout
-  const pages: (typeof selectedLabels)[] = useMemo(() => {
-    if (effectiveLayout === "single") return selectedLabels.map((l) => [l]);
-    const chunks: (typeof selectedLabels)[] = [];
-    for (let i = 0; i < selectedLabels.length; i += 4) {
-      chunks.push(selectedLabels.slice(i, i + 4));
-    }
-    return chunks;
-  }, [selectedLabels, effectiveLayout]);
+  // If only 1 selected, use single-page automatically for a nicer default,
+  // unless the user explicitly picked a grid layout other than grid4.
+  const effectiveLayout: LayoutConfig =
+    selectedLabels.length === 1 && layoutKey === "grid4" ? LAYOUTS.single : LAYOUTS[layoutKey];
+
+  const pages = useMemo(
+    () => chunk(selectedLabels, effectiveLayout.perPage),
+    [selectedLabels, effectiveLayout.perPage],
+  );
 
   return (
     <>
@@ -107,14 +164,17 @@ function PrintPage() {
               <ArrowLeft className="h-4 w-4 mr-1" /> Back
             </Link>
           </Button>
-          <div className="flex gap-2 items-center">
-            <Select value={layout} onValueChange={(v) => setLayout(v as "grid" | "single")}>
-              <SelectTrigger className="w-[200px]">
+          <div className="flex flex-wrap gap-2 items-center">
+            <Select value={layoutKey} onValueChange={(v) => setLayoutKey(v as LayoutKey)}>
+              <SelectTrigger className="w-[260px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="grid">A4 • 4 labels per page</SelectItem>
-                <SelectItem value="single">A4 • 1 label per page</SelectItem>
+                {Object.values(LAYOUTS).map((l) => (
+                  <SelectItem key={l.key} value={l.key}>
+                    {l.title}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Button onClick={() => window.print()} disabled={!canPrint}>
@@ -124,14 +184,32 @@ function PrintPage() {
           </div>
         </div>
 
+        {/* Settings row */}
+        <Card>
+          <CardContent className="pt-6 flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-[260px]">
+              <UILabel htmlFor="site" className="text-xs uppercase tracking-wider text-muted-foreground">
+                Website name (shown on every label footer)
+              </UILabel>
+              <Input
+                id="site"
+                value={websiteName}
+                onChange={(e) => setWebsiteNameValue(e.target.value)}
+                placeholder="shriradhagovindstore.com"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              "Thank you for your order — {websiteName || "your site"}" appears on every label.
+            </p>
+          </CardContent>
+        </Card>
+
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Select labels to print</CardTitle>
               <Button size="sm" variant="outline" onClick={toggleAll}>
-                {selected.size === filtered.length && filtered.length > 0
-                  ? "Clear"
-                  : "Select all"}
+                {selected.size === filtered.length && filtered.length > 0 ? "Clear" : "Select all"}
               </Button>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -148,9 +226,7 @@ function PrintPage() {
                 {isLoading ? (
                   <div className="p-6 text-center text-muted-foreground text-sm">Loading…</div>
                 ) : filtered.length === 0 ? (
-                  <div className="p-6 text-center text-muted-foreground text-sm">
-                    No labels found.
-                  </div>
+                  <div className="p-6 text-center text-muted-foreground text-sm">No labels found.</div>
                 ) : (
                   filtered.map((l) => (
                     <label
@@ -180,7 +256,9 @@ function PrintPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Preview ({selectedLabels.length} selected)</CardTitle>
+              <CardTitle>
+                Preview · {effectiveLayout.title} ({selectedLabels.length} selected)
+              </CardTitle>
             </CardHeader>
             <CardContent>
               {selectedLabels.length === 0 ? (
@@ -188,28 +266,14 @@ function PrintPage() {
                   Pick one or more labels on the left to preview and print.
                 </div>
               ) : (
-                <div className="space-y-4 max-h-[560px] overflow-y-auto">
+                <div className="space-y-4 max-h-[640px] overflow-y-auto">
                   {pages.map((page, pi) => (
                     <div
                       key={pi}
                       className="border rounded-md bg-white p-3 shadow-sm"
                       style={{ aspectRatio: "210 / 297" }}
                     >
-                      <div
-                        className={
-                          effectiveLayout === "single"
-                            ? "h-full"
-                            : "grid grid-cols-2 grid-rows-2 gap-2 h-full"
-                        }
-                      >
-                        {page.map((l) => (
-                          <ShippingLabel
-                            key={l.id}
-                            label={l}
-                            size={effectiveLayout === "single" ? "full" : "compact"}
-                          />
-                        ))}
-                      </div>
+                      <PreviewGrid layout={effectiveLayout} page={page} />
                     </div>
                   ))}
                 </div>
@@ -219,29 +283,52 @@ function PrintPage() {
         </div>
       </div>
 
-      {/* Print area — kept in the DOM (off-screen) so QR/barcode SVGs
-          render before print, then shown by @media print CSS. */}
+      {/* Print area — kept in the DOM (off-screen) so QR/barcode SVGs render. */}
       <div className="print-area" aria-hidden>
-        {effectiveLayout === "grid"
-          ? pages.map((page, pi) => (
-              <div key={pi} className="print-page print-grid">
-                {page.map((l) => (
+        {pages.map((page, pi) => (
+          <div key={pi} className={"print-page " + effectiveLayout.pageClass}>
+            {effectiveLayout.key === "single"
+              ? page.map((l) => <ShippingLabel key={l.id} label={l} size="full" />)
+              : page.map((l) => (
                   <div key={l.id} className="print-cell">
-                    <ShippingLabel label={l} size="compact" />
+                    <ShippingLabel label={l} size={effectiveLayout.size} />
                   </div>
                 ))}
-              </div>
-            ))
-          : selectedLabels.map((l, i) => (
-              <div
-                key={l.id}
-                className="print-page print-page-single"
-                data-last={i === selectedLabels.length - 1 ? "true" : undefined}
-              >
-                <ShippingLabel label={l} size="full" />
-              </div>
-            ))}
+          </div>
+        ))}
       </div>
     </>
+  );
+}
+
+function PreviewGrid({ layout, page }: { layout: LayoutConfig; page: Label[] }) {
+  if (layout.key === "single") {
+    return (
+      <div className="h-full">
+        {page.map((l) => (
+          <ShippingLabel key={l.id} label={l} size="full" />
+        ))}
+      </div>
+    );
+  }
+
+  const cols = "grid-cols-2";
+  const containerStyle: React.CSSProperties =
+    layout.key === "half4"
+      ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
+      : layout.key === "grid8"
+        ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
+        : layout.key === "twoline"
+          ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
+          : { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" };
+
+  return (
+    <div className={cols} style={containerStyle}>
+      {page.map((l) => (
+        <div key={l.id} className="min-w-0">
+          <ShippingLabel label={l} size={layout.size} />
+        </div>
+      ))}
+    </div>
   );
 }

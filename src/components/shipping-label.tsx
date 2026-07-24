@@ -20,6 +20,9 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
   const barcodeWidth = isFull ? 3 : isHalf ? 2 : isMini ? 1.2 : 1.6;
   const barcodeFontSize = isFull ? 20 : isHalf ? 14 : isMini ? 10 : 12;
 
+  const trackingForBarcode = (label.tracking_id || "").trim();
+  const canRenderBarcode = trackingForBarcode.length > 0 && trackingForBarcode !== "—";
+
   const containerClass = isFull
     ? "print-label-full text-black bg-white text-lg leading-snug p-6"
     : isHalf

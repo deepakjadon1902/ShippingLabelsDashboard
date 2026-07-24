@@ -180,6 +180,16 @@ function Dashboard() {
             <CardTitle>All labels</CardTitle>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => refreshAllMutation.mutate()}
+              disabled={refreshAllMutation.isPending}
+              title="Fetch latest tracking status for all non-final labels"
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${refreshAllMutation.isPending ? "animate-spin" : ""}`} />
+              {refreshAllMutation.isPending ? "Refreshing…" : "Refresh all"}
+            </Button>
             <Button asChild size="sm">
               <Link to="/create">
                 <PlusCircle className="h-4 w-4 mr-1" /> New label

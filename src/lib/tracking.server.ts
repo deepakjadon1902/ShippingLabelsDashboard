@@ -8,9 +8,15 @@ export const TRACKINGMORE_SLUGS: Record<string, string> = {
   Xpressbees: "xpressbees",
   "Ecom Express": "ecom-express",
   "India Post": "india-post",
+  // Fallback slugs — used when the primary courier API fails, and as the
+  // only source for Shree Maruti (no direct tracking API).
+  Delhivery: "delhivery",
+  DTDC: "dtdc",
+  "Shree Maruti Courier": "shree-maruti",
 };
 
-// Couriers we auto-refresh. Shree Maruti has no tracking API and is skipped.
+// Couriers we auto-refresh. Shree Maruti is included via TrackingMore; manual
+// status edits from the dashboard still work as before.
 export const AUTO_TRACK_COURIERS = new Set<string>([
   "Delhivery",
   "DTDC",

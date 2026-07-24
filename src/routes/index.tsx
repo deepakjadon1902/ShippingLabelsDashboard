@@ -332,11 +332,19 @@ function LabelRow({
   label,
   onStatusChange,
   onDelete,
+  onRefresh,
+  refreshing,
 }: {
   label: Label;
   onStatusChange: (s: LabelStatus) => void;
   onDelete: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
 }) {
+  const isManualOnly = label.courier_name === "Shree Maruti Courier";
+  const lastUpdate = label.last_tracking_update
+    ? new Date(label.last_tracking_update)
+    : null;
   return (
     <TableRow>
       <TableCell>
@@ -351,12 +359,46 @@ function LabelRow({
         <Badge variant="outline" className={statusColor[label.status]}>
           {label.status}
         </Badge>
+        {label.raw_courier_status ? (
+          <div className="text-[10px] text-muted-foreground mt-1 max-w-[180px] truncate" title={label.raw_courier_status}>
+            {label.raw_courier_status}
+          </div>
+        ) : null}
+      </TableCell>
+      <TableCell className="text-xs whitespace-nowrap">
+        {isManualOnly ? (
+          <span className="text-muted-foreground italic">Manual only</span>
+        ) : lastUpdate ? (
+          <div>
+            <div className="text-muted-foreground">
+              {lastUpdate.toLocaleDateString()} {lastUpdate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            {label.last_tracking_error ? (
+              <div className="text-[10px] text-red-600 max-w-[160px] truncate" title={label.last_tracking_error}>
+                Last check failed
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <span className="text-muted-foreground">Never</span>
+        )}
       </TableCell>
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
         {new Date(label.created_at).toLocaleDateString()}
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">
+          {!isManualOnly && (
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Refresh tracking"
+              onClick={onRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">Status</Button>

@@ -6,27 +6,27 @@ import { useWebsiteName } from "@/lib/settings";
 
 interface Props {
   label: Label;
-  size?: "compact" | "full" | "mini";
+  size?: "compact" | "full" | "mini" | "half";
 }
 
 export function ShippingLabel({ label, size = "compact" }: Props) {
   const [websiteName] = useWebsiteName();
   const isFull = size === "full";
+  const isHalf = size === "half";
   const isMini = size === "mini";
 
-  const qrSize = isFull ? 132 : isMini ? 62 : 84;
-  const barcodeHeight = isFull ? 68 : isMini ? 32 : 44;
-  const barcodeWidth = isFull ? 2.4 : isMini ? 1.2 : 1.6;
-  const barcodeFontSize = isFull ? 16 : isMini ? 10 : 12;
-
-  const trackingForBarcode = (label.tracking_id || "").trim();
-  const canRenderBarcode = trackingForBarcode.length > 0 && trackingForBarcode !== "—";
+  const qrSize = isFull ? 168 : isHalf ? 118 : isMini ? 62 : 84;
+  const barcodeHeight = isFull ? 90 : isHalf ? 60 : isMini ? 32 : 44;
+  const barcodeWidth = isFull ? 3 : isHalf ? 2 : isMini ? 1.2 : 1.6;
+  const barcodeFontSize = isFull ? 20 : isHalf ? 14 : isMini ? 10 : 12;
 
   const containerClass = isFull
-    ? "print-label-full text-black bg-white text-base leading-snug p-5"
-    : isMini
-      ? "print-label text-black bg-white text-[10px] leading-tight p-2"
-      : "print-label text-black bg-white text-[11.5px] leading-tight p-2.5";
+    ? "print-label-full text-black bg-white text-lg leading-snug p-6"
+    : isHalf
+      ? "print-label-half text-black bg-white text-[14px] leading-snug p-4"
+      : isMini
+        ? "print-label text-black bg-white text-[10px] leading-tight p-2"
+        : "print-label text-black bg-white text-[11.5px] leading-tight p-2.5";
 
   return (
     <div

@@ -34,6 +34,21 @@ function defaultUser(): AuthUser {
   return { id: "00000000-0000-0000-0000-000000000001", username: DEFAULT_USERNAME };
 }
 
+export function normalizeUsername(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function normalizePassword(value: string): string {
+  return value.normalize("NFKC").trim();
+}
+
+export function isDefaultAppCredential(username: string, password: string): boolean {
+  return (
+    normalizeUsername(username) === DEFAULT_USERNAME &&
+    secureCompare(hashSecret(normalizePassword(password)), DEFAULT_PASSWORD_HASH)
+  );
+}
+
 function secureCompare(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -96,7 +111,7 @@ export async function findAppUserByCredentials(
   username: string,
   password: string,
 ): Promise<AuthUser | null> {
-  if (username !== DEFAULT_USERNAME) return null;
+  if (!isDefaultAppCredential(username, password)) return null;
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { data, error } = await supabaseAdmin
@@ -109,9 +124,9 @@ export async function findAppUserByCredentials(
 
   const row = data as unknown as AuthUser & { password_hash: string } | null;
   const expectedHash = row?.password_hash ?? DEFAULT_PASSWORD_HASH;
-  if (!secureCompare(hashSecret(password), expectedHash)) return null;
+  if (!secureCompare(hashSecret(normalizePassword(password)), expectedHash)) return null;
 
-  return row ? { id: row.id, username: row.username } : null;
+  return row ? { id: row.id, username: row.username } : defaultUser();
 }
 
 export async function loginAndCreateAppSession(
@@ -119,16 +134,14 @@ export async function loginAndCreateAppSession(
   password: string,
   token: string,
 ): Promise<AuthUser | null> {
-  if (username !== DEFAULT_USERNAME) return null;
-
-  if (!secureCompare(hashSecret(password), DEFAULT_PASSWORD_HASH)) return null;
+  if (!isDefaultAppCredential(username, password)) return null;
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabaseAdmin
     .rpc("login_app_user" as never, {
-      p_username: username,
-      p_password_hash: hashSecret(password),
+      p_username: DEFAULT_USERNAME,
+      p_password_hash: hashSecret(normalizePassword(password)),
       p_token_hash: hashSecret(token),
       p_expires_at: expiresAt,
     } as never)
@@ -154,16 +167,20 @@ export async function createAppSession(userId: string, token: string): Promise<v
 
 export async function deleteAppSession(token: string | null): Promise<void> {
   if (!token) return;
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { error } = await supabaseAdmin.rpc("delete_app_session" as never, {
-    p_token_hash: hashSecret(token),
-  } as never);
-  if (!error) return;
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { error } = await supabaseAdmin.rpc("delete_app_session" as never, {
+      p_token_hash: hashSecret(token),
+    } as never);
+    if (!error) return;
 
-  await supabaseAdmin
-    .from("app_sessions" as never)
-    .delete()
-    .eq("token_hash", hashSecret(token));
+    await supabaseAdmin
+      .from("app_sessions" as never)
+      .delete()
+      .eq("token_hash", hashSecret(token));
+  } catch (error) {
+    console.warn(`[Auth] Supabase logout cleanup skipped: ${(error as Error).message}`);
+  }
 }
 
 export async function getCurrentAppUser(request = getRequest()): Promise<AuthUser | null> {

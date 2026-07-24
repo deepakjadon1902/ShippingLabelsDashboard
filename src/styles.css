@@ -171,17 +171,26 @@
     break-after: auto;
   }
 
-  /* 4-up grid layout. */
-  .print-grid {
+  /* Grid layouts — auto rows so labels hug content (no forced empty gap). */
+  .print-grid-4,
+  .print-grid-8,
+  .print-grid-half4,
+  .print-grid-twoline {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: 1fr 1fr;
-    gap: 6mm;
+    grid-auto-rows: min-content;
+    align-content: start;
+    gap: 4mm;
+  }
+
+  /* Half-page variant confines content to the top half of A4. */
+  .print-grid-half4 {
+    max-height: 137mm;
+    overflow: hidden;
   }
 
   .print-cell {
     min-width: 0;
-    min-height: 0;
     overflow: hidden;
     page-break-inside: avoid;
     break-inside: avoid;
@@ -195,7 +204,7 @@
   }
 
   /* The label component itself — auto height so it hugs its content
-     and doesn't leave empty space below the barcode. */
+     and doesn't leave empty space below the footer. */
   .print-label,
   .print-label-full {
     width: 100%;

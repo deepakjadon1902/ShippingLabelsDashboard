@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, PlusCircle, Printer, Package, Settings } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Printer, Settings } from "lucide-react";
 
+import { AppLogo } from "@/components/app-logo";
 import {
   Sidebar,
   SidebarContent,
@@ -27,9 +28,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Package className="h-5 w-5" />
-          </div>
+          <AppLogo />
           <div className="flex flex-col group-data-[collapsible=icon]:hidden">
             <span className="text-sm font-semibold leading-tight">Ship Labels</span>
             <span className="text-xs text-muted-foreground">Devotional Ecom</span>

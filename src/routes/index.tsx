@@ -84,6 +84,8 @@ const statusColor: Record<LabelStatus, string> = {
 
 function Dashboard() {
   const qc = useQueryClient();
+  const refreshOneFn = useServerFn(refreshLabelTracking);
+  const refreshAllFn = useServerFn(refreshAllTracking);
   const { data: labels = [], isLoading } = useQuery({
     queryKey: ["labels"],
     queryFn: listLabels,
@@ -135,6 +137,28 @@ function Dashboard() {
       qc.invalidateQueries({ queryKey: ["labels"] });
       toast.success("Label deleted");
       setDeleteId(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const refreshOneMutation = useMutation({
+    mutationFn: (id: string) => refreshOneFn({ data: { id } }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["labels"] });
+      if (r.skipped) toast.info(r.reason ?? "Skipped");
+      else if (r.error) toast.warning(`Last check failed: ${r.error}`);
+      else toast.success(`Updated: ${r.rawStatus ?? "no change"}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const refreshAllMutation = useMutation({
+    mutationFn: () => refreshAllFn(),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["labels"] });
+      toast.success(
+        `Refreshed ${r.processed} labels — ${r.updated} status updates, ${r.failed} failed, ${r.skipped} skipped`,
+      );
     },
     onError: (e: Error) => toast.error(e.message),
   });

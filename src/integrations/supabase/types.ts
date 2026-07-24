@@ -19,8 +19,11 @@ export type Database = {
           courier_name: string
           created_at: string
           id: string
+          last_tracking_error: string | null
+          last_tracking_update: string | null
           notes: string | null
           order_reference: string | null
+          raw_courier_status: string | null
           receiver_address_line1: string
           receiver_address_line2: string | null
           receiver_city: string
@@ -36,8 +39,11 @@ export type Database = {
           courier_name: string
           created_at?: string
           id?: string
+          last_tracking_error?: string | null
+          last_tracking_update?: string | null
           notes?: string | null
           order_reference?: string | null
+          raw_courier_status?: string | null
           receiver_address_line1: string
           receiver_address_line2?: string | null
           receiver_city: string
@@ -53,8 +59,11 @@ export type Database = {
           courier_name?: string
           created_at?: string
           id?: string
+          last_tracking_error?: string | null
+          last_tracking_update?: string | null
           notes?: string | null
           order_reference?: string | null
+          raw_courier_status?: string | null
           receiver_address_line1?: string
           receiver_address_line2?: string | null
           receiver_city?: string

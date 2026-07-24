@@ -18,6 +18,9 @@ export interface Label {
   order_reference: string | null;
   status: LabelStatus;
   notes: string | null;
+  last_tracking_update?: string | null;
+  raw_courier_status?: string | null;
+  last_tracking_error?: string | null;
 }
 
 export type LabelInput = Omit<Label, "id" | "created_at">;

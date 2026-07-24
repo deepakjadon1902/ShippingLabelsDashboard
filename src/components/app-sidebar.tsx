@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, PlusCircle, Printer, Package } from "lucide-react";
+import { LayoutDashboard, PlusCircle, Printer, Package, Settings } from "lucide-react";
 
 import {
   Sidebar,
@@ -17,6 +17,7 @@ const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Create Label", url: "/create", icon: PlusCircle },
   { title: "Print Labels", url: "/print", icon: Printer },
+  { title: "Settings", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {

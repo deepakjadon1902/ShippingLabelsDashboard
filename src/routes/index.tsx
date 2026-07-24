@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -12,7 +13,10 @@ import {
   Trash2,
   Printer,
   PlusCircle,
+  RefreshCw,
 } from "lucide-react";
+
+import { refreshLabelTracking, refreshAllTracking } from "@/lib/tracking.functions";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +84,8 @@ const statusColor: Record<LabelStatus, string> = {
 
 function Dashboard() {
   const qc = useQueryClient();
+  const refreshOneFn = useServerFn(refreshLabelTracking);
+  const refreshAllFn = useServerFn(refreshAllTracking);
   const { data: labels = [], isLoading } = useQuery({
     queryKey: ["labels"],
     queryFn: listLabels,
@@ -135,6 +141,28 @@ function Dashboard() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const refreshOneMutation = useMutation({
+    mutationFn: (id: string) => refreshOneFn({ data: { id } }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["labels"] });
+      if (r.skipped) toast.info(r.reason ?? "Skipped");
+      else if (r.error) toast.warning(`Last check failed: ${r.error}`);
+      else toast.success(`Updated: ${r.rawStatus ?? "no change"}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const refreshAllMutation = useMutation({
+    mutationFn: () => refreshAllFn(),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["labels"] });
+      toast.success(
+        `Refreshed ${r.processed} labels — ${r.updated} status updates, ${r.failed} failed, ${r.skipped} skipped`,
+      );
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
       {/* Summary */}
@@ -152,6 +180,16 @@ function Dashboard() {
             <CardTitle>All labels</CardTitle>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => refreshAllMutation.mutate()}
+              disabled={refreshAllMutation.isPending}
+              title="Fetch latest tracking status for all non-final labels"
+            >
+              <RefreshCw className={`h-4 w-4 mr-1 ${refreshAllMutation.isPending ? "animate-spin" : ""}`} />
+              {refreshAllMutation.isPending ? "Refreshing…" : "Refresh all"}
+            </Button>
             <Button asChild size="sm">
               <Link to="/create">
                 <PlusCircle className="h-4 w-4 mr-1" /> New label
@@ -207,6 +245,7 @@ function Dashboard() {
                   <TableHead>Courier</TableHead>
                   <TableHead>Tracking ID</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Last update</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -214,13 +253,13 @@ function Dashboard() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                       Loading…
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                       No labels found.
                     </TableCell>
                   </TableRow>
@@ -231,6 +270,8 @@ function Dashboard() {
                       label={l}
                       onStatusChange={(status) => statusMutation.mutate({ id: l.id, status })}
                       onDelete={() => setDeleteId(l.id)}
+                      onRefresh={() => refreshOneMutation.mutate(l.id)}
+                      refreshing={refreshOneMutation.isPending && refreshOneMutation.variables === l.id}
                     />
                   ))
                 )}
@@ -291,11 +332,19 @@ function LabelRow({
   label,
   onStatusChange,
   onDelete,
+  onRefresh,
+  refreshing,
 }: {
   label: Label;
   onStatusChange: (s: LabelStatus) => void;
   onDelete: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
 }) {
+  const isManualOnly = label.courier_name === "Shree Maruti Courier";
+  const lastUpdate = label.last_tracking_update
+    ? new Date(label.last_tracking_update)
+    : null;
   return (
     <TableRow>
       <TableCell>
@@ -310,12 +359,46 @@ function LabelRow({
         <Badge variant="outline" className={statusColor[label.status]}>
           {label.status}
         </Badge>
+        {label.raw_courier_status ? (
+          <div className="text-[10px] text-muted-foreground mt-1 max-w-[180px] truncate" title={label.raw_courier_status}>
+            {label.raw_courier_status}
+          </div>
+        ) : null}
+      </TableCell>
+      <TableCell className="text-xs whitespace-nowrap">
+        {isManualOnly ? (
+          <span className="text-muted-foreground italic">Manual only</span>
+        ) : lastUpdate ? (
+          <div>
+            <div className="text-muted-foreground">
+              {lastUpdate.toLocaleDateString()} {lastUpdate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            {label.last_tracking_error ? (
+              <div className="text-[10px] text-red-600 max-w-[160px] truncate" title={label.last_tracking_error}>
+                Last check failed
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <span className="text-muted-foreground">Never</span>
+        )}
       </TableCell>
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
         {new Date(label.created_at).toLocaleDateString()}
       </TableCell>
       <TableCell className="text-right">
         <div className="flex justify-end gap-1">
+          {!isManualOnly && (
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Refresh tracking"
+              onClick={onRefresh}
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">Status</Button>

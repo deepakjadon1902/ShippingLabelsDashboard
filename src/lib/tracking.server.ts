@@ -1,0 +1,197 @@
+// Server-only tracking helpers. Never imported from client code.
+// Handles direct courier APIs (Delhivery, DTDC) and TrackingMore for the rest.
+
+export type InternalStatus = "Pending" | "Shipped" | "Delivered" | "RTO";
+
+export const TRACKINGMORE_SLUGS: Record<string, string> = {
+  Shadowfax: "shadowfax",
+  Xpressbees: "xpressbees",
+  "Ecom Express": "ecom-express",
+  "India Post": "india-post",
+};
+
+// Couriers we auto-refresh. Shree Maruti has no tracking API and is skipped.
+export const AUTO_TRACK_COURIERS = new Set<string>([
+  "Delhivery",
+  "DTDC",
+  ...Object.keys(TRACKINGMORE_SLUGS),
+]);
+
+export function mapStatus(rawInput: string | null | undefined): InternalStatus | null {
+  if (!rawInput) return null;
+  const raw = rawInput.toLowerCase();
+  if (
+    raw.includes("deliver") &&
+    !raw.includes("undeliver") &&
+    !raw.includes("not deliver")
+  )
+    return "Delivered";
+  if (
+    raw.includes("rto") ||
+    raw.includes("return") ||
+    raw.includes("returned") ||
+    raw.includes("undelivered") ||
+    raw.includes("refused")
+  )
+    return "RTO";
+  if (
+    raw.includes("in transit") ||
+    raw.includes("intransit") ||
+    raw.includes("dispatch") ||
+    raw.includes("shipped") ||
+    raw.includes("out for delivery") ||
+    raw.includes("in-transit") ||
+    raw.includes("transit") ||
+    raw.includes("picked") ||
+    raw.includes("manifested") ||
+    raw.includes("info received") ||
+    raw.includes("inforeceived") ||
+    raw.includes("available_for_pickup") ||
+    raw.includes("pending")
+  )
+    return "Shipped";
+  return null;
+}
+
+export interface TrackingResult {
+  internalStatus: InternalStatus | null;
+  rawStatus: string | null;
+  error: string | null;
+}
+
+// ---------------- Delhivery ----------------
+export async function fetchDelhivery(waybill: string): Promise<TrackingResult> {
+  const token = process.env.DELHIVERY_API_TOKEN;
+  if (!token) return { internalStatus: null, rawStatus: null, error: "Missing DELHIVERY_API_TOKEN" };
+  try {
+    const res = await fetch(
+      `https://track.delhivery.com/api/v1/packages/json/?waybill=${encodeURIComponent(waybill)}&ref_ids=`,
+      {
+        headers: {
+          Authorization: `Token ${token}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    if (!res.ok) return { internalStatus: null, rawStatus: null, error: `Delhivery ${res.status}` };
+    const data = (await res.json()) as {
+      ShipmentData?: Array<{
+        Shipment?: {
+          Status?: { Status?: string; StatusType?: string; Instructions?: string };
+        };
+      }>;
+    };
+    const shipment = data.ShipmentData?.[0]?.Shipment?.Status;
+    const raw = shipment?.Status || shipment?.Instructions || shipment?.StatusType || null;
+    return { internalStatus: mapStatus(raw), rawStatus: raw, error: raw ? null : "No status in response" };
+  } catch (e) {
+    return { internalStatus: null, rawStatus: null, error: (e as Error).message };
+  }
+}
+
+// ---------------- DTDC ----------------
+// DTDC's tracking endpoint. Uses the customer's api-key header.
+export async function fetchDTDC(waybill: string): Promise<TrackingResult> {
+  const token = process.env.DTDC_API_TOKEN;
+  if (!token) return { internalStatus: null, rawStatus: null, error: "Missing DTDC_API_TOKEN" };
+  try {
+    const res = await fetch(
+      "https://blktracksvc.dtdc.com/dtdc-api/rest/JSONCnTrk/getTrackDetails",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": token,
+        },
+        body: JSON.stringify({
+          trkType: "cnno",
+          strcnno: waybill,
+          addtnlDtl: "Y",
+        }),
+      },
+    );
+    if (!res.ok) return { internalStatus: null, rawStatus: null, error: `DTDC ${res.status}` };
+    const data = (await res.json()) as {
+      trackHeader?: { strStatus?: string; strStatusDesc?: string };
+      trackDetails?: Array<{ strAction?: string; strActionDate?: string }>;
+    };
+    const raw =
+      data.trackHeader?.strStatusDesc ||
+      data.trackHeader?.strStatus ||
+      data.trackDetails?.[0]?.strAction ||
+      null;
+    return { internalStatus: mapStatus(raw), rawStatus: raw, error: raw ? null : "No status in response" };
+  } catch (e) {
+    return { internalStatus: null, rawStatus: null, error: (e as Error).message };
+  }
+}
+
+// ---------------- TrackingMore ----------------
+const TM_BASE = "https://api.trackingmore.com/v4";
+
+export async function trackingMoreRegister(
+  courierName: string,
+  waybill: string,
+): Promise<{ ok: boolean; error: string | null }> {
+  const key = process.env.TRACKINGMORE_API_KEY;
+  const slug = TRACKINGMORE_SLUGS[courierName];
+  if (!key) return { ok: false, error: "Missing TRACKINGMORE_API_KEY" };
+  if (!slug) return { ok: false, error: `No TrackingMore slug for ${courierName}` };
+  try {
+    const res = await fetch(`${TM_BASE}/trackings/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Tracking-Api-Key": key,
+      },
+      body: JSON.stringify({ tracking_number: waybill, courier_code: slug }),
+    });
+    // 200 created, 4218 already exists — both OK
+    const data = (await res.json().catch(() => ({}))) as { code?: number; meta?: { code?: number }; message?: string };
+    const code = data.code ?? data.meta?.code ?? res.status;
+    if (code === 200 || code === 201 || code === 4218 || res.ok) return { ok: true, error: null };
+    return { ok: false, error: data.message || `TrackingMore create ${code}` };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export async function fetchTrackingMore(
+  courierName: string,
+  waybill: string,
+): Promise<TrackingResult> {
+  const key = process.env.TRACKINGMORE_API_KEY;
+  const slug = TRACKINGMORE_SLUGS[courierName];
+  if (!key) return { internalStatus: null, rawStatus: null, error: "Missing TRACKINGMORE_API_KEY" };
+  if (!slug) return { internalStatus: null, rawStatus: null, error: `No TM slug for ${courierName}` };
+  try {
+    const url = `${TM_BASE}/trackings/get?tracking_numbers=${encodeURIComponent(waybill)}&courier_code=${slug}`;
+    const res = await fetch(url, { headers: { "Tracking-Api-Key": key } });
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: Array<{ delivery_status?: string; latest_event?: string; status_info?: string }>;
+      message?: string;
+    };
+    if (!res.ok) return { internalStatus: null, rawStatus: null, error: data.message || `TrackingMore ${res.status}` };
+    const first = data.data?.[0];
+    if (!first) {
+      // Not yet registered — try to register then note as pending
+      await trackingMoreRegister(courierName, waybill);
+      return { internalStatus: null, rawStatus: null, error: "Not yet tracked; registered now" };
+    }
+    const raw = first.delivery_status || first.latest_event || first.status_info || null;
+    return { internalStatus: mapStatus(raw), rawStatus: raw, error: raw ? null : "No status yet" };
+  } catch (e) {
+    return { internalStatus: null, rawStatus: null, error: (e as Error).message };
+  }
+}
+
+// ---------------- Router ----------------
+export async function fetchTrackingForCourier(
+  courierName: string,
+  waybill: string,
+): Promise<TrackingResult> {
+  if (courierName === "Delhivery") return fetchDelhivery(waybill);
+  if (courierName === "DTDC") return fetchDTDC(waybill);
+  if (TRACKINGMORE_SLUGS[courierName]) return fetchTrackingMore(courierName, waybill);
+  return { internalStatus: null, rawStatus: null, error: `No tracking API for ${courierName}` };
+}

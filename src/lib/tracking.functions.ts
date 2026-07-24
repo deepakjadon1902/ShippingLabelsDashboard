@@ -127,7 +127,7 @@ export const runTrackingSelfTest = createServerFn({ method: "POST" }).handler(as
     },
     autoCouriers: Array.from(tracking.AUTO_TRACK_COURIERS),
     trackingMoreSlugs: tracking.TRACKINGMORE_SLUGS,
-    shreeMarutiSkipped: !tracking.AUTO_TRACK_COURIERS.has("Shree Maruti Courier"),
+    shreeMarutiViaTrackingMore: tracking.AUTO_TRACK_COURIERS.has("Shree Maruti Courier"),
     statusMapping: {
       Delivered: tracking.mapStatus("Delivered"),
       Dispatched: tracking.mapStatus("Dispatched"),

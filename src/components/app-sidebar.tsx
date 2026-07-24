@@ -30,7 +30,7 @@ export function AppSidebar() {
         <div className="flex items-center gap-2 px-2 py-3">
           <AppLogo />
           <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-            <span className="text-sm font-semibold leading-tight">ShippingLavelGenrator</span>
+            <span className="text-sm font-semibold leading-tight">ShippingLabelsDashboard</span>
           </div>
         </div>
       </SidebarHeader>

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
-  <title id="title">ShippingLavelGenrator</title>
+  <title id="title">ShippingLabelsDashboard</title>
   <desc id="desc">A shipping label with route lines and a saffron delivery mark.</desc>
   <rect width="256" height="256" rx="40" fill="#fff8ec"/>
   <path fill="#e8680a" d="M66 54h96l30 30v118H66z"/>

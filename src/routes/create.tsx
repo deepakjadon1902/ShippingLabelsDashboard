@@ -30,9 +30,9 @@ import {
 export const Route = createFileRoute("/create")({
   head: () => ({
     meta: [
-      { title: "Create Label — Shipping Labels" },
+      { title: "Create Label — ShippingLabelsDashboard" },
       { name: "description", content: "Add a new parcel label with receiver details, courier and tracking." },
-      { property: "og:title", content: "Create Label — Shipping Labels" },
+      { property: "og:title", content: "Create Label — ShippingLabelsDashboard" },
       { property: "og:description", content: "Add a new parcel label with receiver details, courier and tracking." },
     ],
   }),

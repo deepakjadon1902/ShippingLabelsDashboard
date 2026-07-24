@@ -1,4 +1,4 @@
-# ShippingLavelGenrator
+# ShippingLabelsDashboard
 
 A TanStack Start app for creating, tracking, and printing shipping labels for an ecommerce workflow.
 

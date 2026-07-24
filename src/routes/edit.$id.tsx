@@ -30,7 +30,7 @@ import {
 export const Route = createFileRoute("/edit/$id")({
   head: () => ({
     meta: [
-      { title: "Edit Label — Shipping Labels" },
+      { title: "Edit Label — ShippingLabelsDashboard" },
       { name: "description", content: "Edit an existing shipping label." },
       { name: "robots", content: "noindex" },
     ],

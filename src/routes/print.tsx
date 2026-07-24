@@ -27,9 +27,9 @@ const searchSchema = z.object({
 export const Route = createFileRoute("/print")({
   head: () => ({
     meta: [
-      { title: "Print Labels — Shipping Labels" },
+      { title: "Print Labels — ShippingLabelsDashboard" },
       { name: "description", content: "Select labels and print them on A4 in flexible grid layouts." },
-      { property: "og:title", content: "Print Labels — Shipping Labels" },
+      { property: "og:title", content: "Print Labels — ShippingLabelsDashboard" },
       { property: "og:description", content: "Print your saved shipping labels on A4." },
     ],
   }),

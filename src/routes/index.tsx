@@ -66,9 +66,9 @@ import {
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Dashboard — Shipping Labels" },
+      { title: "Dashboard — ShippingLabelsDashboard" },
       { name: "description", content: "All your shipping labels in one place. Search, filter and manage every parcel." },
-      { property: "og:title", content: "Dashboard — Shipping Labels" },
+      { property: "og:title", content: "Dashboard — ShippingLabelsDashboard" },
       { property: "og:description", content: "All your shipping labels in one place." },
     ],
   }),

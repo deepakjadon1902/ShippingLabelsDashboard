@@ -14,6 +14,9 @@ import { Route as CreateRouteImport } from './routes/create'
 import { Route as PrintRouteImport } from './routes/print'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as EditIdRouteImport } from './routes/edit.$id'
+import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
+import { Route as ApiAuthLogoutRouteImport } from './routes/api/auth/logout'
+import { Route as ApiAuthMeRouteImport } from './routes/api/auth/me'
 import { Route as ApiPublicHooksRefreshTrackingRouteImport } from './routes/api/public/hooks/refresh-tracking'
 
 const IndexRoute = IndexRouteImport.update({
@@ -41,6 +44,21 @@ const EditIdRoute = EditIdRouteImport.update({
   path: '/edit/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
+  id: '/api/auth/login',
+  path: '/api/auth/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthLogoutRoute = ApiAuthLogoutRouteImport.update({
+  id: '/api/auth/logout',
+  path: '/api/auth/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthMeRoute = ApiAuthMeRouteImport.update({
+  id: '/api/auth/me',
+  path: '/api/auth/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicHooksRefreshTrackingRoute =
   ApiPublicHooksRefreshTrackingRouteImport.update({
     id: '/api/public/hooks/refresh-tracking',
@@ -54,6 +72,9 @@ export interface FileRoutesByFullPath {
   '/print': typeof PrintRoute
   '/settings': typeof SettingsRoute
   '/edit/$id': typeof EditIdRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
   '/api/public/hooks/refresh-tracking': typeof ApiPublicHooksRefreshTrackingRoute
 }
 export interface FileRoutesByTo {
@@ -62,6 +83,9 @@ export interface FileRoutesByTo {
   '/print': typeof PrintRoute
   '/settings': typeof SettingsRoute
   '/edit/$id': typeof EditIdRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
   '/api/public/hooks/refresh-tracking': typeof ApiPublicHooksRefreshTrackingRoute
 }
 export interface FileRoutesById {
@@ -71,6 +95,9 @@ export interface FileRoutesById {
   '/print': typeof PrintRoute
   '/settings': typeof SettingsRoute
   '/edit/$id': typeof EditIdRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/auth/logout': typeof ApiAuthLogoutRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
   '/api/public/hooks/refresh-tracking': typeof ApiPublicHooksRefreshTrackingRoute
 }
 export interface FileRouteTypes {
@@ -81,6 +108,9 @@ export interface FileRouteTypes {
     | '/print'
     | '/settings'
     | '/edit/$id'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/me'
     | '/api/public/hooks/refresh-tracking'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -89,6 +119,9 @@ export interface FileRouteTypes {
     | '/print'
     | '/settings'
     | '/edit/$id'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/me'
     | '/api/public/hooks/refresh-tracking'
   id:
     | '__root__'
@@ -97,6 +130,9 @@ export interface FileRouteTypes {
     | '/print'
     | '/settings'
     | '/edit/$id'
+    | '/api/auth/login'
+    | '/api/auth/logout'
+    | '/api/auth/me'
     | '/api/public/hooks/refresh-tracking'
   fileRoutesById: FileRoutesById
 }
@@ -106,6 +142,9 @@ export interface RootRouteChildren {
   PrintRoute: typeof PrintRoute
   SettingsRoute: typeof SettingsRoute
   EditIdRoute: typeof EditIdRoute
+  ApiAuthLoginRoute: typeof ApiAuthLoginRoute
+  ApiAuthLogoutRoute: typeof ApiAuthLogoutRoute
+  ApiAuthMeRoute: typeof ApiAuthMeRoute
   ApiPublicHooksRefreshTrackingRoute: typeof ApiPublicHooksRefreshTrackingRoute
 }
 
@@ -146,6 +185,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EditIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/login': {
+      id: '/api/auth/login'
+      path: '/api/auth/login'
+      fullPath: '/api/auth/login'
+      preLoaderRoute: typeof ApiAuthLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/logout': {
+      id: '/api/auth/logout'
+      path: '/api/auth/logout'
+      fullPath: '/api/auth/logout'
+      preLoaderRoute: typeof ApiAuthLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/me': {
+      id: '/api/auth/me'
+      path: '/api/auth/me'
+      fullPath: '/api/auth/me'
+      preLoaderRoute: typeof ApiAuthMeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/hooks/refresh-tracking': {
       id: '/api/public/hooks/refresh-tracking'
       path: '/api/public/hooks/refresh-tracking'
@@ -162,6 +222,9 @@ const rootRouteChildren: RootRouteChildren = {
   PrintRoute: PrintRoute,
   SettingsRoute: SettingsRoute,
   EditIdRoute: EditIdRoute,
+  ApiAuthLoginRoute: ApiAuthLoginRoute,
+  ApiAuthLogoutRoute: ApiAuthLogoutRoute,
+  ApiAuthMeRoute: ApiAuthMeRoute,
   ApiPublicHooksRefreshTrackingRoute: ApiPublicHooksRefreshTrackingRoute,
 }
 export const routeTree = rootRouteImport

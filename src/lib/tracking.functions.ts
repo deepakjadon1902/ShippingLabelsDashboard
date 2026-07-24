@@ -9,6 +9,8 @@ type LabelUpdate = {
 };
 
 export const getTrackingCredsStatus = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireAppUser } = await import("./auth.server");
+  await requireAppUser();
   return {
     delhivery: !!process.env.DELHIVERY_API_TOKEN,
     dtdc: !!process.env.DTDC_API_TOKEN,
@@ -19,10 +21,12 @@ export const getTrackingCredsStatus = createServerFn({ method: "GET" }).handler(
 export const refreshLabelTracking = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data }) => {
-    const [{ supabaseAdmin }, tracking] = await Promise.all([
+    const [{ supabaseAdmin }, tracking, auth] = await Promise.all([
       import("@/integrations/supabase/client.server"),
       import("./tracking.server"),
+      import("./auth.server"),
     ]);
+    await auth.requireAppUser();
     const { data: row, error } = await supabaseAdmin
       .from("labels")
       .select("id, courier_name, tracking_id, status")
@@ -49,10 +53,12 @@ export const refreshLabelTracking = createServerFn({ method: "POST" })
   });
 
 export const refreshAllTracking = createServerFn({ method: "POST" }).handler(async () => {
-  const [{ supabaseAdmin }, tracking] = await Promise.all([
+  const [{ supabaseAdmin }, tracking, auth] = await Promise.all([
     import("@/integrations/supabase/client.server"),
     import("./tracking.server"),
+    import("./auth.server"),
   ]);
+  await auth.requireAppUser();
   const { data: rows, error } = await supabaseAdmin
     .from("labels")
     .select("id, courier_name, tracking_id, status")
@@ -101,10 +107,12 @@ export const refreshAllTracking = createServerFn({ method: "POST" }).handler(asy
 export const registerTrackingMoreForLabel = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data }) => {
-    const [{ supabaseAdmin }, tracking] = await Promise.all([
+    const [{ supabaseAdmin }, tracking, auth] = await Promise.all([
       import("@/integrations/supabase/client.server"),
       import("./tracking.server"),
+      import("./auth.server"),
     ]);
+    await auth.requireAppUser();
     const { data: row } = await supabaseAdmin
       .from("labels")
       .select("courier_name, tracking_id")
@@ -118,6 +126,8 @@ export const registerTrackingMoreForLabel = createServerFn({ method: "POST" })
   });
 
 export const runTrackingSelfTest = createServerFn({ method: "POST" }).handler(async () => {
+  const { requireAppUser } = await import("./auth.server");
+  await requireAppUser();
   const tracking = await import("./tracking.server");
   return {
     credentials: {

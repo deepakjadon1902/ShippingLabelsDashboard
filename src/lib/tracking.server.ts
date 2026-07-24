@@ -12,7 +12,7 @@ export const TRACKINGMORE_SLUGS: Record<string, string> = {
   // only source for Shree Maruti (no direct tracking API).
   Delhivery: "delhivery",
   DTDC: "dtdc",
-  "Shree Maruti Courier": "shree-maruti",
+  "Shree Maruti Courier": "shreemaruticourier",
 };
 
 // Couriers we auto-refresh. Shree Maruti is included via TrackingMore; manual

@@ -29,9 +29,6 @@ export const refreshLabelTracking = createServerFn({ method: "POST" })
       .eq("id", data.id)
       .maybeSingle();
     if (error || !row) throw new Error(error?.message || "Label not found");
-    if (row.courier_name === "Shree Maruti Courier") {
-      return { skipped: true, reason: "Shree Maruti — manual only" };
-    }
     if (!tracking.AUTO_TRACK_COURIERS.has(row.courier_name)) {
       return { skipped: true, reason: `No tracking API for ${row.courier_name}` };
     }

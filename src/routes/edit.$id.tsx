@@ -26,6 +26,7 @@ import {
   type LabelInput,
   type LabelStatus,
 } from "@/lib/labels";
+import { useSenderProfiles } from "@/lib/settings";
 
 export const Route = createFileRoute("/edit/$id")({
   head: () => ({
@@ -39,10 +40,12 @@ export const Route = createFileRoute("/edit/$id")({
 });
 
 const OTHER = "__other__";
+const SENDER_KEEP = "__keep__";
 
 function EditLabelPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
+  const [profiles] = useSenderProfiles();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["labels", id],
@@ -52,6 +55,7 @@ function EditLabelPage() {
   const [form, setForm] = useState<LabelInput | null>(null);
   const [courierSelection, setCourierSelection] = useState<string>("");
   const [customCourier, setCustomCourier] = useState("");
+  const [senderChoice, setSenderChoice] = useState<string>(SENDER_KEEP);
 
   useEffect(() => {
     if (data) {
@@ -69,6 +73,11 @@ function EditLabelPage() {
         order_reference: data.order_reference ?? "",
         status: data.status,
         notes: data.notes ?? "",
+        sender_name: data.sender_name ?? "",
+        sender_address: data.sender_address ?? "",
+        sender_phone: data.sender_phone ?? "",
+        sender_website: data.sender_website ?? "",
+        sender_review_url: data.sender_review_url ?? "",
       });
       if (COMMON_COURIERS.includes(data.courier_name)) {
         setCourierSelection(data.courier_name);
@@ -90,6 +99,12 @@ function EditLabelPage() {
 
   const activeCourier = courierSelection === OTHER ? customCourier : courierSelection;
 
+  // Sender to render on preview and to save on submit. If user picks "keep",
+  // reuse the snapshot already stored on the label.
+  const overrideSender = senderChoice === "0" || senderChoice === "1"
+    ? profiles[senderChoice === "1" ? 1 : 0]
+    : null;
+
   const previewLabel: Label | null = useMemo(() => {
     if (!form) return null;
     return {
@@ -102,8 +117,13 @@ function EditLabelPage() {
       receiver_mobile_2: form.receiver_mobile_2 || null,
       order_reference: form.order_reference || null,
       notes: form.notes || null,
+      sender_name: (overrideSender?.name ?? form.sender_name) || null,
+      sender_address: (overrideSender?.address ?? form.sender_address) || null,
+      sender_phone: (overrideSender?.phone ?? form.sender_phone) || null,
+      sender_website: (overrideSender?.website ?? form.sender_website) || null,
+      sender_review_url: (overrideSender?.review_url ?? form.sender_review_url) || null,
     };
-  }, [form, id, data, activeCourier]);
+  }, [form, id, data, activeCourier, overrideSender]);
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading…</div>;
   if (error) return <div className="p-6 text-destructive">{(error as Error).message}</div>;
@@ -121,6 +141,21 @@ function EditLabelPage() {
       toast.error("Courier is required");
       return;
     }
+    const senderFields = overrideSender
+      ? {
+          sender_name: overrideSender.name?.trim() || null,
+          sender_address: overrideSender.address?.trim() || null,
+          sender_phone: overrideSender.phone?.trim() || null,
+          sender_website: overrideSender.website?.trim() || null,
+          sender_review_url: overrideSender.review_url?.trim() || null,
+        }
+      : {
+          sender_name: form.sender_name?.trim() || null,
+          sender_address: form.sender_address?.trim() || null,
+          sender_phone: form.sender_phone?.trim() || null,
+          sender_website: form.sender_website?.trim() || null,
+          sender_review_url: form.sender_review_url?.trim() || null,
+        };
     mutation.mutate({
       ...form,
       courier_name: activeCourier.trim(),
@@ -128,6 +163,7 @@ function EditLabelPage() {
       receiver_mobile_2: form.receiver_mobile_2?.trim() || null,
       order_reference: form.order_reference?.trim() || null,
       notes: form.notes?.trim() || null,
+      ...senderFields,
     });
   }
 
@@ -146,6 +182,18 @@ function EditLabelPage() {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-3">
+                <Field label="Sender profile">
+                  <Select value={senderChoice} onValueChange={setSenderChoice}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SENDER_KEEP}>
+                        Keep original {data.sender_name ? `(${data.sender_name})` : "(none)"}
+                      </SelectItem>
+                      <SelectItem value="0">Switch to: {profiles[0].name || "Profile 1"}</SelectItem>
+                      <SelectItem value="1">Switch to: {profiles[1].name || "Profile 2"}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
                 <Field label="Full name *">
                   <Input value={form.receiver_name} onChange={(e) => set("receiver_name", e.target.value)} required />
                 </Field>
@@ -216,7 +264,7 @@ function EditLabelPage() {
         </Card>
         <div className="space-y-3">
           <div className="text-sm font-medium text-muted-foreground">Live preview</div>
-          <div className="aspect-[3/4] w-full max-w-sm">
+          <div className="w-full max-w-sm">
             <ShippingLabel label={previewLabel} size="compact" />
           </div>
         </div>

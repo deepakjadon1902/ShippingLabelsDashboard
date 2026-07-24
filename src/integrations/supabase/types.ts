@@ -32,6 +32,11 @@ export type Database = {
           receiver_name: string
           receiver_pincode: string
           receiver_state: string
+          sender_address: string | null
+          sender_name: string | null
+          sender_phone: string | null
+          sender_review_url: string | null
+          sender_website: string | null
           status: string
           tracking_id: string
         }
@@ -52,6 +57,11 @@ export type Database = {
           receiver_name: string
           receiver_pincode: string
           receiver_state: string
+          sender_address?: string | null
+          sender_name?: string | null
+          sender_phone?: string | null
+          sender_review_url?: string | null
+          sender_website?: string | null
           status?: string
           tracking_id: string
         }
@@ -72,6 +82,11 @@ export type Database = {
           receiver_name?: string
           receiver_pincode?: string
           receiver_state?: string
+          sender_address?: string | null
+          sender_name?: string | null
+          sender_phone?: string | null
+          sender_review_url?: string | null
+          sender_website?: string | null
           status?: string
           tracking_id?: string
         }

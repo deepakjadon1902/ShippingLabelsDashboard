@@ -26,6 +26,7 @@ import {
   type LabelInput,
   type LabelStatus,
 } from "@/lib/labels";
+import { useSenderProfiles } from "@/lib/settings";
 
 export const Route = createFileRoute("/create")({
   head: () => ({
@@ -55,16 +56,24 @@ const emptyForm: LabelInput = {
   order_reference: "",
   status: "Pending",
   notes: "",
+  sender_name: "",
+  sender_address: "",
+  sender_phone: "",
+  sender_website: "",
+  sender_review_url: "",
 };
 
 function CreateLabelPage() {
   const navigate = useNavigate();
+  const [profiles] = useSenderProfiles();
   const [form, setForm] = useState<LabelInput>(emptyForm);
   const [courierSelection, setCourierSelection] = useState<string>("");
   const [customCourier, setCustomCourier] = useState("");
+  const [senderIdx, setSenderIdx] = useState<string>("0");
   const [saved, setSaved] = useState<Label | null>(null);
 
   const activeCourier = courierSelection === OTHER ? customCourier : courierSelection;
+  const activeSender = profiles[senderIdx === "1" ? 1 : 0];
 
   const isValid = useMemo(() => {
     return (
@@ -89,6 +98,11 @@ function CreateLabelPage() {
     receiver_mobile_2: form.receiver_mobile_2 || null,
     order_reference: form.order_reference || null,
     notes: form.notes || null,
+    sender_name: activeSender.name || null,
+    sender_address: activeSender.address || null,
+    sender_phone: activeSender.phone || null,
+    sender_website: activeSender.website || null,
+    sender_review_url: activeSender.review_url || null,
   };
 
   const registerTM = useServerFn(registerTrackingMoreForLabel);
@@ -98,9 +112,6 @@ function CreateLabelPage() {
     onSuccess: (data) => {
       setSaved(data);
       toast.success("Label saved");
-      // Fire-and-forget TrackingMore registration for supported couriers
-      // Register with TrackingMore for any supported courier (including
-      // Delhivery/DTDC as fallback source and Shree Maruti as the only source).
       const tmSlugs = [
         "Shadowfax",
         "Xpressbees",
@@ -111,9 +122,7 @@ function CreateLabelPage() {
         "Shree Maruti Courier",
       ];
       if (tmSlugs.includes(data.courier_name)) {
-        registerTM({ data: { id: data.id } }).catch(() => {
-          // silent — refresh job will re-register if needed
-        });
+        registerTM({ data: { id: data.id } }).catch(() => {});
       }
     },
     onError: (e: Error) => toast.error(e.message),
@@ -132,6 +141,12 @@ function CreateLabelPage() {
       receiver_mobile_2: form.receiver_mobile_2?.trim() || null,
       order_reference: form.order_reference?.trim() || null,
       notes: form.notes?.trim() || null,
+      // snapshot the sender profile at creation time
+      sender_name: activeSender.name?.trim() || null,
+      sender_address: activeSender.address?.trim() || null,
+      sender_phone: activeSender.phone?.trim() || null,
+      sender_website: activeSender.website?.trim() || null,
+      sender_review_url: activeSender.review_url?.trim() || null,
     });
   }
 
@@ -147,6 +162,23 @@ function CreateLabelPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
+            <Section title="From (Sender)">
+              <Field label="Sender profile *">
+                <Select value={senderIdx} onValueChange={setSenderIdx}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">{profiles[0].name || "Profile 1"}</SelectItem>
+                    <SelectItem value="1">{profiles[1].name || "Profile 2"}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Edit these profiles in Settings. The chosen profile is snapshotted onto this label.
+                </p>
+              </Field>
+            </Section>
+
             <Section title="Receiver">
               <Field label="Full name *">
                 <Input value={form.receiver_name} onChange={(e) => set("receiver_name", e.target.value)} required />
@@ -261,11 +293,11 @@ function CreateLabelPage() {
 
       <div className="space-y-3">
         <div className="text-sm font-medium text-muted-foreground">Live preview</div>
-        <div className="aspect-[3/4] w-full max-w-sm">
+        <div className="w-full max-w-sm">
           <ShippingLabel label={previewLabel} size="compact" />
         </div>
         <p className="text-xs text-muted-foreground">
-          This is roughly how each label will print. The QR encodes the tracking URL when a known courier is selected, otherwise the tracking ID itself.
+          The tracking QR encodes the AWB. The smaller QR (top-left) encodes the sender's Google Review link.
         </p>
       </div>
     </div>

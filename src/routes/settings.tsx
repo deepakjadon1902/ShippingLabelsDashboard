@@ -228,12 +228,12 @@ function SettingsPage() {
           <div>
             <h3 className="text-lg font-semibold">Sender profiles</h3>
             <p className="text-sm text-muted-foreground">
-              Save two return addresses. Pick one on each label. Past labels keep their snapshot.
+              Edit any field and click its Save button. Past labels keep their snapshot.
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={handleReset}>Reset</Button>
-            <Button onClick={handleSave}>Save profiles</Button>
+            <Button variant="ghost" onClick={handleReset}>Discard changes</Button>
+            <Button onClick={handleSave}>Save all</Button>
           </div>
         </div>
 
@@ -241,14 +241,33 @@ function SettingsPage() {
           <SenderEditor
             title="Profile 1"
             value={draft[0]}
+            saved={profiles[0]}
             onChange={(v) => setDraft([v, draft[1]])}
+            onSaveField={(key) => {
+              const next: [SenderProfile, SenderProfile] = [
+                { ...profiles[0], [key]: draft[0][key] },
+                profiles[1],
+              ];
+              saveProfiles(next);
+              toast.success(`Profile 1 · ${key} saved`);
+            }}
           />
           <SenderEditor
             title="Profile 2"
             value={draft[1]}
+            saved={profiles[1]}
             onChange={(v) => setDraft([draft[0], v])}
+            onSaveField={(key) => {
+              const next: [SenderProfile, SenderProfile] = [
+                profiles[0],
+                { ...profiles[1], [key]: draft[1][key] },
+              ];
+              saveProfiles(next);
+              toast.success(`Profile 2 · ${key} saved`);
+            }}
           />
         </div>
+
 
         <Card>
           <CardHeader>

@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { registerTrackingMoreForLabel } from "@/lib/tracking.functions";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,11 +91,20 @@ function CreateLabelPage() {
     notes: form.notes || null,
   };
 
+  const registerTM = useServerFn(registerTrackingMoreForLabel);
+
   const mutation = useMutation({
     mutationFn: (input: LabelInput) => createLabel(input),
     onSuccess: (data) => {
       setSaved(data);
       toast.success("Label saved");
+      // Fire-and-forget TrackingMore registration for supported couriers
+      const tmSlugs = ["Shadowfax", "Xpressbees", "Ecom Express", "India Post"];
+      if (tmSlugs.includes(data.courier_name)) {
+        registerTM({ data: { id: data.id } }).catch(() => {
+          // silent — refresh job will re-register if needed
+        });
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });

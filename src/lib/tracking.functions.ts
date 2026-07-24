@@ -1,6 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+type LabelUpdate = {
+  status?: string;
+  last_tracking_update?: string | null;
+  raw_courier_status?: string | null;
+  last_tracking_error?: string | null;
+};
+
 export const getTrackingCredsStatus = createServerFn({ method: "GET" }).handler(async () => {
   return {
     delhivery: !!process.env.DELHIVERY_API_TOKEN,

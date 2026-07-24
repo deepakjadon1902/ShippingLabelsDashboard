@@ -9,11 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PrintRouteImport } from './routes/print'
 import { Route as CreateRouteImport } from './routes/create'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditIdRouteImport } from './routes/edit.$id'
+import { Route as ApiPublicHooksRefreshTrackingRouteImport } from './routes/api/public/hooks/refresh-tracking'
 
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrintRoute = PrintRouteImport.update({
   id: '/print',
   path: '/print',
@@ -34,43 +41,83 @@ const EditIdRoute = EditIdRouteImport.update({
   path: '/edit/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicHooksRefreshTrackingRoute =
+  ApiPublicHooksRefreshTrackingRouteImport.update({
+    id: '/api/public/hooks/refresh-tracking',
+    path: '/api/public/hooks/refresh-tracking',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/create': typeof CreateRoute
   '/print': typeof PrintRoute
+  '/settings': typeof SettingsRoute
   '/edit/$id': typeof EditIdRoute
+  '/api/public/hooks/refresh-tracking': typeof ApiPublicHooksRefreshTrackingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/create': typeof CreateRoute
   '/print': typeof PrintRoute
+  '/settings': typeof SettingsRoute
   '/edit/$id': typeof EditIdRoute
+  '/api/public/hooks/refresh-tracking': typeof ApiPublicHooksRefreshTrackingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/create': typeof CreateRoute
   '/print': typeof PrintRoute
+  '/settings': typeof SettingsRoute
   '/edit/$id': typeof EditIdRoute
+  '/api/public/hooks/refresh-tracking': typeof ApiPublicHooksRefreshTrackingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/create' | '/print' | '/edit/$id'
+  fullPaths:
+    | '/'
+    | '/create'
+    | '/print'
+    | '/settings'
+    | '/edit/$id'
+    | '/api/public/hooks/refresh-tracking'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/create' | '/print' | '/edit/$id'
-  id: '__root__' | '/' | '/create' | '/print' | '/edit/$id'
+  to:
+    | '/'
+    | '/create'
+    | '/print'
+    | '/settings'
+    | '/edit/$id'
+    | '/api/public/hooks/refresh-tracking'
+  id:
+    | '__root__'
+    | '/'
+    | '/create'
+    | '/print'
+    | '/settings'
+    | '/edit/$id'
+    | '/api/public/hooks/refresh-tracking'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CreateRoute: typeof CreateRoute
   PrintRoute: typeof PrintRoute
+  SettingsRoute: typeof SettingsRoute
   EditIdRoute: typeof EditIdRoute
+  ApiPublicHooksRefreshTrackingRoute: typeof ApiPublicHooksRefreshTrackingRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/print': {
       id: '/print'
       path: '/print'
@@ -99,6 +146,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EditIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/hooks/refresh-tracking': {
+      id: '/api/public/hooks/refresh-tracking'
+      path: '/api/public/hooks/refresh-tracking'
+      fullPath: '/api/public/hooks/refresh-tracking'
+      preLoaderRoute: typeof ApiPublicHooksRefreshTrackingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -106,18 +160,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CreateRoute: CreateRoute,
   PrintRoute: PrintRoute,
+  SettingsRoute: SettingsRoute,
   EditIdRoute: EditIdRoute,
+  ApiPublicHooksRefreshTrackingRoute: ApiPublicHooksRefreshTrackingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

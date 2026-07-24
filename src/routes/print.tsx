@@ -37,7 +37,7 @@ export const Route = createFileRoute("/print")({
   component: PrintPage,
 });
 
-type LayoutKey = "single" | "grid4" | "grid8" | "half4" | "twoline";
+type LayoutKey = "single" | "half2" | "grid4" | "grid8";
 
 interface LayoutConfig {
   key: LayoutKey;
@@ -45,21 +45,29 @@ interface LayoutConfig {
   description: string;
   perPage: number;
   pageClass: string;
-  size: "full" | "compact" | "mini";
+  size: "full" | "half" | "compact" | "mini";
 }
 
 const LAYOUTS: Record<LayoutKey, LayoutConfig> = {
   single: {
     key: "single",
-    title: "A4 · 1 label per page",
-    description: "One label filling the full A4 page",
+    title: "1 per page (Large)",
+    description: "Full A4 — big QR, big barcode, big text",
     perPage: 1,
     pageClass: "print-page-single",
     size: "full",
   },
+  half2: {
+    key: "half2",
+    title: "2 per page (Half page each)",
+    description: "Top and bottom half — each label fills its half",
+    perPage: 2,
+    pageClass: "print-grid-half2",
+    size: "half",
+  },
   grid4: {
     key: "grid4",
-    title: "A4 · 4 labels per page (2×2)",
+    title: "4 per page (2×2 grid)",
     description: "Classic 4-up grid",
     perPage: 4,
     pageClass: "print-grid-4",
@@ -67,27 +75,11 @@ const LAYOUTS: Record<LayoutKey, LayoutConfig> = {
   },
   grid8: {
     key: "grid8",
-    title: "A4 · 8 labels per page (2×4)",
+    title: "8 per page (2×4 grid)",
     description: "Compact 2 columns by 4 rows",
     perPage: 8,
     pageClass: "print-grid-8",
     size: "mini",
-  },
-  half4: {
-    key: "half4",
-    title: "A4 · 4 labels in half page (2×2)",
-    description: "Fills the top half of A4 tightly",
-    perPage: 4,
-    pageClass: "print-grid-half4",
-    size: "compact",
-  },
-  twoline: {
-    key: "twoline",
-    title: "A4 · 2 labels per line",
-    description: "Two side-by-side, repeating down the page",
-    perPage: 8,
-    pageClass: "print-grid-twoline",
-    size: "compact",
   },
 };
 
@@ -312,18 +304,34 @@ function PreviewGrid({ layout, page }: { layout: LayoutConfig; page: Label[] }) 
     );
   }
 
-  const cols = "grid-cols-2";
-  const containerStyle: React.CSSProperties =
-    layout.key === "half4"
-      ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
-      : layout.key === "grid8"
-        ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
-        : layout.key === "twoline"
-          ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
-          : { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" };
+  if (layout.key === "half2") {
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateRows: "1fr 1fr",
+          gap: "4mm",
+          height: "100%",
+        }}
+      >
+        {page.map((l) => (
+          <div key={l.id} className="min-w-0 min-h-0 flex">
+            <ShippingLabel label={l} size="half" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className={cols} style={containerStyle}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: "3mm",
+        alignContent: "start",
+      }}
+    >
       {page.map((l) => (
         <div key={l.id} className="min-w-0">
           <ShippingLabel label={l} size={layout.size} />

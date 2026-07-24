@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -12,7 +13,10 @@ import {
   Trash2,
   Printer,
   PlusCircle,
+  RefreshCw,
 } from "lucide-react";
+
+import { refreshLabelTracking, refreshAllTracking } from "@/lib/tracking.functions";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

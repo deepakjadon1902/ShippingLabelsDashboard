@@ -171,11 +171,9 @@
     break-after: auto;
   }
 
-  /* Grid layouts — auto rows so labels hug content (no forced empty gap). */
+  /* 4-up and 8-up grids — auto rows so labels hug content. */
   .print-grid-4,
-  .print-grid-8,
-  .print-grid-half4,
-  .print-grid-twoline {
+  .print-grid-8 {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
     grid-auto-rows: min-content;
@@ -183,10 +181,21 @@
     gap: 4mm;
   }
 
-  /* Half-page variant confines content to the top half of A4. */
-  .print-grid-half4 {
-    max-height: 137mm;
-    overflow: hidden;
+  /* 2 per page — top half and bottom half, each label fills its half. */
+  .print-grid-half2 {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 5mm;
+    height: 275mm;
+  }
+  .print-grid-half2 .print-cell {
+    height: 100%;
+    display: flex;
+    align-items: stretch;
+  }
+  .print-grid-half2 .print-cell > .print-label-half {
+    height: 100%;
   }
 
   .print-cell {
@@ -198,14 +207,18 @@
     align-items: flex-start;
   }
 
-  /* Single full-page label. */
+  /* Single full-page label — fills the whole printable area. */
   .print-page-single {
-    padding: 6mm;
+    padding: 0;
+  }
+  .print-page-single > .print-label-full {
+    height: 100%;
   }
 
   /* The label component itself — auto height so it hugs its content
      and doesn't leave empty space below the footer. */
   .print-label,
+  .print-label-half,
   .print-label-full {
     width: 100%;
     height: auto;
@@ -221,6 +234,7 @@
 
   /* Preserve QR + barcode blacks exactly. */
   .print-label svg,
+  .print-label-half svg,
   .print-label-full svg,
   .print-area svg {
     -webkit-print-color-adjust: exact !important;

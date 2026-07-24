@@ -99,7 +99,17 @@ function CreateLabelPage() {
       setSaved(data);
       toast.success("Label saved");
       // Fire-and-forget TrackingMore registration for supported couriers
-      const tmSlugs = ["Shadowfax", "Xpressbees", "Ecom Express", "India Post"];
+      // Register with TrackingMore for any supported courier (including
+      // Delhivery/DTDC as fallback source and Shree Maruti as the only source).
+      const tmSlugs = [
+        "Shadowfax",
+        "Xpressbees",
+        "Ecom Express",
+        "India Post",
+        "Delhivery",
+        "DTDC",
+        "Shree Maruti Courier",
+      ];
       if (tmSlugs.includes(data.courier_name)) {
         registerTM({ data: { id: data.id } }).catch(() => {
           // silent — refresh job will re-register if needed

@@ -304,18 +304,34 @@ function PreviewGrid({ layout, page }: { layout: LayoutConfig; page: Label[] }) 
     );
   }
 
-  const cols = "grid-cols-2";
-  const containerStyle: React.CSSProperties =
-    layout.key === "half4"
-      ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
-      : layout.key === "grid8"
-        ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
-        : layout.key === "twoline"
-          ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" }
-          : { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3mm", alignContent: "start" };
+  if (layout.key === "half2") {
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateRows: "1fr 1fr",
+          gap: "4mm",
+          height: "100%",
+        }}
+      >
+        {page.map((l) => (
+          <div key={l.id} className="min-w-0 min-h-0 flex">
+            <ShippingLabel label={l} size="half" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className={cols} style={containerStyle}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: "3mm",
+        alignContent: "start",
+      }}
+    >
       {page.map((l) => (
         <div key={l.id} className="min-w-0">
           <ShippingLabel label={l} size={layout.size} />

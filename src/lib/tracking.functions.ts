@@ -37,7 +37,7 @@ export const refreshLabelTracking = createServerFn({ method: "POST" })
     }
     const result = await tracking.fetchTrackingForCourier(row.courier_name, row.tracking_id);
     const now = new Date().toISOString();
-    const patch: Record<string, unknown> = {
+    const patch: LabelUpdate = {
       last_tracking_update: now,
       raw_courier_status: result.rawStatus ?? undefined,
       last_tracking_error: result.error,
@@ -75,7 +75,7 @@ export const refreshAllTracking = createServerFn({ method: "POST" }).handler(asy
     processed++;
     try {
       const result = await tracking.fetchTrackingForCourier(row.courier_name, row.tracking_id);
-      const patch: Record<string, unknown> = {
+      const patch: LabelUpdate = {
         last_tracking_update: new Date().toISOString(),
         raw_courier_status: result.rawStatus ?? undefined,
         last_tracking_error: result.error,
@@ -122,7 +122,7 @@ export const registerTrackingMoreForLabel = createServerFn({ method: "POST" })
 
 export const runTrackingSelfTest = createServerFn({ method: "POST" }).handler(async () => {
   const tracking = await import("./tracking.server");
-  const results: Record<string, unknown> = {};
+  const results: LabelUpdate = {};
   results.credentials = {
     delhivery: !!process.env.DELHIVERY_API_TOKEN,
     dtdc: !!process.env.DTDC_API_TOKEN,

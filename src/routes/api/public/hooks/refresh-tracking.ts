@@ -30,7 +30,7 @@ export const Route = createFileRoute("/api/public/hooks/refresh-tracking")({
               row.courier_name,
               row.tracking_id,
             );
-            const patch: Record<string, unknown> = {
+            const patch: { last_tracking_update: string; raw_courier_status?: string; last_tracking_error: string | null; status?: string } = {
               last_tracking_update: new Date().toISOString(),
               raw_courier_status: result.rawStatus ?? undefined,
               last_tracking_error: result.error,

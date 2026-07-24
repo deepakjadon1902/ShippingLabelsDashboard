@@ -21,6 +21,11 @@ export interface Label {
   last_tracking_update?: string | null;
   raw_courier_status?: string | null;
   last_tracking_error?: string | null;
+  sender_name?: string | null;
+  sender_address?: string | null;
+  sender_phone?: string | null;
+  sender_website?: string | null;
+  sender_review_url?: string | null;
 }
 
 export type LabelInput = Omit<Label, "id" | "created_at">;

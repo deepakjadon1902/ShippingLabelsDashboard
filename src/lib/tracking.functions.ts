@@ -122,21 +122,21 @@ export const registerTrackingMoreForLabel = createServerFn({ method: "POST" })
 
 export const runTrackingSelfTest = createServerFn({ method: "POST" }).handler(async () => {
   const tracking = await import("./tracking.server");
-  const results: LabelUpdate = {};
-  results.credentials = {
-    delhivery: !!process.env.DELHIVERY_API_TOKEN,
-    dtdc: !!process.env.DTDC_API_TOKEN,
-    trackingmore: !!process.env.TRACKINGMORE_API_KEY,
+  return {
+    credentials: {
+      delhivery: !!process.env.DELHIVERY_API_TOKEN,
+      dtdc: !!process.env.DTDC_API_TOKEN,
+      trackingmore: !!process.env.TRACKINGMORE_API_KEY,
+    },
+    autoCouriers: Array.from(tracking.AUTO_TRACK_COURIERS),
+    trackingMoreSlugs: tracking.TRACKINGMORE_SLUGS,
+    shreeMarutiSkipped: !tracking.AUTO_TRACK_COURIERS.has("Shree Maruti Courier"),
+    statusMapping: {
+      Delivered: tracking.mapStatus("Delivered"),
+      Dispatched: tracking.mapStatus("Dispatched"),
+      InTransit: tracking.mapStatus("In Transit"),
+      RTO: tracking.mapStatus("RTO Delivered"),
+      Unknown: tracking.mapStatus("gibberish"),
+    },
   };
-  results.autoCouriers = Array.from(tracking.AUTO_TRACK_COURIERS);
-  results.trackingMoreSlugs = tracking.TRACKINGMORE_SLUGS;
-  results.shreeMarutiSkipped = !tracking.AUTO_TRACK_COURIERS.has("Shree Maruti Courier");
-  results.statusMapping = {
-    Delivered: tracking.mapStatus("Delivered"),
-    Dispatched: tracking.mapStatus("Dispatched"),
-    "In Transit": tracking.mapStatus("In Transit"),
-    RTO: tracking.mapStatus("RTO Delivered"),
-    Unknown: tracking.mapStatus("gibberish"),
-  };
-  return results;
 });

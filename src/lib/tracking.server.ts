@@ -65,9 +65,38 @@ export interface TrackingResult {
   error: string | null;
 }
 
+const FALLBACK_TRACKINGMORE_API_KEY = "-79v7-y0hl-yry6-xb6g6iwdmqxp";
+const FALLBACK_DELHIVERY_API_TOKEN = "de41deae72274feca0751366310bd9095578886a";
+const FALLBACK_DTDC_API_TOKEN = "58d5dcf428c775221ad7589aac90a2";
+
+function envOrFallback(envName: string, fallback: string): string {
+  const value = process.env[envName];
+  return value && value.trim() ? value.trim() : fallback;
+}
+
+export function getDelhiveryToken(): string {
+  return envOrFallback("DELHIVERY_API_TOKEN", FALLBACK_DELHIVERY_API_TOKEN);
+}
+
+export function getDTdcToken(): string {
+  return envOrFallback("DTDC_API_TOKEN", FALLBACK_DTDC_API_TOKEN);
+}
+
+export function getTrackingMoreKey(): string {
+  return envOrFallback("TRACKINGMORE_API_KEY", FALLBACK_TRACKINGMORE_API_KEY);
+}
+
+export function getTrackingCredentialsStatus() {
+  return {
+    delhivery: !!getDelhiveryToken(),
+    dtdc: !!getDTdcToken(),
+    trackingmore: !!getTrackingMoreKey(),
+  };
+}
+
 // ---------------- Delhivery ----------------
 export async function fetchDelhivery(waybill: string): Promise<TrackingResult> {
-  const token = process.env.DELHIVERY_API_TOKEN;
+  const token = getDelhiveryToken();
   if (!token) return { internalStatus: null, rawStatus: null, error: "Missing DELHIVERY_API_TOKEN" };
   try {
     const res = await fetch(
@@ -104,7 +133,7 @@ export async function fetchDelhivery(waybill: string): Promise<TrackingResult> {
 // ---------------- DTDC ----------------
 // DTDC's tracking endpoint. Uses the customer's api-key header.
 export async function fetchDTDC(waybill: string): Promise<TrackingResult> {
-  const token = process.env.DTDC_API_TOKEN;
+  const token = getDTdcToken();
   if (!token) return { internalStatus: null, rawStatus: null, error: "Missing DTDC_API_TOKEN" };
   try {
     const res = await fetch(
@@ -145,7 +174,7 @@ export async function trackingMoreRegister(
   courierName: string,
   waybill: string,
 ): Promise<{ ok: boolean; error: string | null }> {
-  const key = process.env.TRACKINGMORE_API_KEY;
+  const key = getTrackingMoreKey();
   const slug = TRACKINGMORE_SLUGS[courierName];
   if (!key) return { ok: false, error: "Missing TRACKINGMORE_API_KEY" };
   if (!slug) return { ok: false, error: `No TrackingMore slug for ${courierName}` };
@@ -172,7 +201,7 @@ export async function fetchTrackingMore(
   courierName: string,
   waybill: string,
 ): Promise<TrackingResult> {
-  const key = process.env.TRACKINGMORE_API_KEY;
+  const key = getTrackingMoreKey();
   const slug = TRACKINGMORE_SLUGS[courierName];
   if (!key) return { internalStatus: null, rawStatus: null, error: "Missing TRACKINGMORE_API_KEY" };
   if (!slug) return { internalStatus: null, rawStatus: null, error: `No TM slug for ${courierName}` };

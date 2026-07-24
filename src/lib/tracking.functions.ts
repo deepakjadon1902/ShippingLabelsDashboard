@@ -9,13 +9,12 @@ type LabelUpdate = {
 };
 
 export const getTrackingCredsStatus = createServerFn({ method: "GET" }).handler(async () => {
-  const { requireAppUser } = await import("./auth.server");
-  await requireAppUser();
-  return {
-    delhivery: !!process.env.DELHIVERY_API_TOKEN,
-    dtdc: !!process.env.DTDC_API_TOKEN,
-    trackingmore: !!process.env.TRACKINGMORE_API_KEY,
-  };
+  const [auth, tracking] = await Promise.all([
+    import("./auth.server"),
+    import("./tracking.server"),
+  ]);
+  await auth.requireAppUser();
+  return tracking.getTrackingCredentialsStatus();
 });
 
 export const refreshLabelTracking = createServerFn({ method: "POST" })
@@ -130,11 +129,7 @@ export const runTrackingSelfTest = createServerFn({ method: "POST" }).handler(as
   await requireAppUser();
   const tracking = await import("./tracking.server");
   return {
-    credentials: {
-      delhivery: !!process.env.DELHIVERY_API_TOKEN,
-      dtdc: !!process.env.DTDC_API_TOKEN,
-      trackingmore: !!process.env.TRACKINGMORE_API_KEY,
-    },
+    credentials: tracking.getTrackingCredentialsStatus(),
     autoCouriers: Array.from(tracking.AUTO_TRACK_COURIERS),
     trackingMoreSlugs: tracking.TRACKINGMORE_SLUGS,
     shreeMarutiViaTrackingMore: tracking.AUTO_TRACK_COURIERS.has("Shree Maruti Courier"),

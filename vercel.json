@@ -1,4 +1,14 @@
 {
   "installCommand": "if [ -f frontend/package.json ]; then npm --prefix frontend install; else npm install; fi",
-  "buildCommand": "if [ -f frontend/package.json ]; then npm run vercel-build; else npm run build; fi"
+  "buildCommand": "if [ -f frontend/package.json ]; then npm run vercel-build; else npm run build; fi",
+  "rewrites": [
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://shippinglabelsdashboard-1.onrender.com/api/v1/:path*"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://shippinglabelsdashboard-1.onrender.com/api/v1/:path*"
+    }
+  ]
 }

@@ -5,6 +5,8 @@ import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 
+const nitroPreset = process.env.VERCEL ? "vercel" : "cloudflare-module";
+
 export default defineConfig(({ command }) => ({
   server: {
     host: "::",
@@ -35,7 +37,7 @@ export default defineConfig(({ command }) => ({
       },
       server: { entry: "server" },
     }),
-    command === "build" ? nitro({ defaultPreset: "cloudflare-module" }) : null,
+    command === "build" ? nitro({ defaultPreset: nitroPreset }) : null,
     viteReact(),
   ],
 }));

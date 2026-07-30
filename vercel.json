@@ -1,4 +1,4 @@
 {
-  "installCommand": "npm --prefix frontend ci",
+  "installCommand": "npm --prefix frontend install",
   "buildCommand": "npm run vercel-build"
 }

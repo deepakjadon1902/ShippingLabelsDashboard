@@ -10,9 +10,19 @@ dotenv.config();
 
 const PORT = Number(process.env.PORT || 5000);
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/brajmart_shipping_labels";
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:8080";
+const CLIENT_ORIGINS = [
+  "http://localhost:8080",
+  "https://labels.brajmart.com",
+  ...(process.env.CLIENT_ORIGIN || "").split(","),
+]
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const SESSION_COOKIE = "brajmart_session";
 const SESSION_DAYS = 7;
+const IS_HOSTED_PRODUCTION =
+  process.env.NODE_ENV === "production" ||
+  process.env.RENDER === "true" ||
+  !!process.env.RENDER_EXTERNAL_URL;
 const STATUSES = ["Pending", "Shipped", "Delivered", "RTO"];
 const DEFAULT_PASSWORD_HASH = "f6412bd354418eb6e2bc75d56ba896d9b9f6d0047d6a0ee0d9782f6ec5528d65";
 const DEFAULT_SENDER_PROFILES = [
@@ -144,7 +154,15 @@ const SenderProfile = mongoose.model("SenderProfile", senderProfileSchema);
 
 const app = express();
 
-app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || CLIENT_ORIGINS.includes(origin)) return callback(null, true);
+      return callback(new Error(`CORS origin not allowed: ${origin}`));
+    },
+    credentials: true,
+  }),
+);
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
@@ -172,8 +190,8 @@ function createToken() {
 function cookieOptions() {
   return {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: IS_HOSTED_PRODUCTION ? "none" : "lax",
+    secure: IS_HOSTED_PRODUCTION,
     maxAge: SESSION_DAYS * 24 * 60 * 60 * 1000,
   };
 }

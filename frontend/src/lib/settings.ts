@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
+import { getApiBaseUrl } from "./api-base";
 
 export const DEFAULT_WEBSITE_NAME = "www.brajmart.com";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+const API_BASE_URL = getApiBaseUrl();
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {

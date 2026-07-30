@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getApiBaseUrl } from "@/lib/api-base";
 
 function NotFoundComponent() {
   return (
@@ -122,7 +123,7 @@ type AuthResponse = {
   user: { username: string } | null;
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
+const API_BASE_URL = getApiBaseUrl();
 
 async function fetchAuth(): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE_URL}/auth/me`, { credentials: "include" });

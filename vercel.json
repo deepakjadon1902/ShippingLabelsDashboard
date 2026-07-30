@@ -1,4 +1,4 @@
 {
-  "installCommand": "npm --prefix frontend install",
-  "buildCommand": "npm run vercel-build"
+  "installCommand": "if [ -f frontend/package.json ]; then npm --prefix frontend install; else npm install; fi",
+  "buildCommand": "if [ -f frontend/package.json ]; then npm run vercel-build; else npm run build; fi"
 }

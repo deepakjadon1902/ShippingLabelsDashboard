@@ -10,13 +10,19 @@ dotenv.config();
 
 const PORT = Number(process.env.PORT || 5000);
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/brajmart_shipping_labels";
+const DEFAULT_CLIENT_ORIGINS = ["http://localhost:8080", "https://labels.brajmart.com"];
 const CLIENT_ORIGINS = [
-  "http://localhost:8080",
-  "https://labels.brajmart.com",
-  ...(process.env.CLIENT_ORIGIN || "").split(","),
+  ...DEFAULT_CLIENT_ORIGINS,
+  process.env.CLIENT_ORIGIN,
+  process.env.CLIENT_ORIGINS,
+  process.env.ALLOWED_ORIGINS,
+  process.env.FRONTEND_URL,
+  process.env.CLIENT_URL,
 ]
-  .map((origin) => origin.trim())
+  .flatMap((value) => String(value || "").split(","))
+  .map((origin) => origin.trim().replace(/\/$/, ""))
   .filter(Boolean);
+const ALLOWED_CLIENT_ORIGINS = new Set(CLIENT_ORIGINS);
 const SESSION_COOKIE = "brajmart_session";
 const SESSION_DAYS = 7;
 const IS_HOSTED_PRODUCTION =
@@ -157,7 +163,9 @@ const app = express();
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || CLIENT_ORIGINS.includes(origin)) return callback(null, true);
+      if (!origin || ALLOWED_CLIENT_ORIGINS.has(origin.replace(/\/$/, ""))) {
+        return callback(null, true);
+      }
       return callback(new Error(`CORS origin not allowed: ${origin}`));
     },
     credentials: true,
@@ -166,6 +174,11 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+app.use((req, _res, next) => {
+  if (req.url === "/api/v1") req.url = "/api";
+  else if (req.url.startsWith("/api/v1/")) req.url = `/api/${req.url.slice("/api/v1/".length)}`;
+  next();
+});
 
 function hashSecret(value) {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");

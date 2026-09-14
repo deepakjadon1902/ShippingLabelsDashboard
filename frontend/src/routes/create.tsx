@@ -19,7 +19,6 @@ import { ShippingLabel } from "@/components/shipping-label";
 import {
   COMMON_COURIERS,
   createLabel,
-  registerTrackingMoreForLabel,
   STATUSES,
   type Label,
   type LabelInput,
@@ -130,18 +129,6 @@ function CreateLabelPage() {
     onSuccess: (data) => {
       setSaved(data);
       toast.success("Label saved");
-      const tmSlugs = [
-        "Shadowfax",
-        "Xpressbees",
-        "Ecom Express",
-        "India Post",
-        "Delhivery",
-        "DTDC",
-        "Shree Maruti Courier",
-      ];
-      if (tmSlugs.includes(data.courier_name)) {
-        registerTrackingMoreForLabel(data.id).catch(() => {});
-      }
     },
     onError: (e: Error) => toast.error(e.message),
   });

@@ -24,7 +24,11 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
-const operationsItems = [
+const operationsItems: Array<{
+  title: string;
+  tab: "overview" | "shipments" | "today" | "delayed" | "rto" | "reports";
+  icon: typeof LayoutDashboard;
+}> = [
   { title: "Dashboard", tab: "overview", icon: LayoutDashboard },
   { title: "Shipments & Tracking", tab: "shipments", icon: Truck },
   { title: "Today's Deliveries", tab: "today", icon: CalendarCheck },

@@ -18,7 +18,7 @@ const MONGODB_URI =
 const SYNC_ALL_COURIERS = process.argv.includes("--all");
 const TARGET_COURIERS = SYNC_ALL_COURIERS
   ? null
-  : ["DTDC", "Shree Maruti Courier", "Delhivery"];
+  : ["DTDC", "Shree Maruti Courier", "Delhivery", "Ekart", "Ekart Logistics"];
 
 async function runSync() {
   console.log("==========================================");

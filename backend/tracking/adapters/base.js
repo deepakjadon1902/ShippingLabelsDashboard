@@ -55,6 +55,7 @@ export function mapStatus(rawInput) {
     raw.includes("data received") ||
     raw.includes("label created") ||
     raw.includes("order created") ||
+    raw.includes("order placed") ||
     raw.includes("not picked")
   ) {
     return "Pending";

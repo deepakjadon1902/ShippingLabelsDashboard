@@ -7,12 +7,15 @@ export interface TrackingHistoryItem {
   description: string;
   location?: string | null;
   status?: string | null;
+  raw_status?: string | null;
   source?: string | null;
 }
 
 export interface Label {
   id: string;
   created_at: string;
+  failure_reason?: string | null;
+  rto_reason?: string | null;
   receiver_name: string;
   receiver_address_line1: string;
   receiver_address_line2: string | null;
@@ -82,6 +85,7 @@ export const COMMON_COURIERS = [
   "Delhivery",
   "Shree Maruti Courier",
   "DTDC",
+  "Ekart",
   "Xpressbees",
   "Ecom Express",
   "Shadowfax",
@@ -94,6 +98,8 @@ const TRACKING_URLS: Record<string, (id: string) => string> = {
   Delhivery: (id) => `https://www.delhivery.com/tracking?tracking_id=${id}`,
   "Shree Maruti Courier": (id) => `https://www.shreemaruti.com/tracking?awb=${id}`,
   DTDC: (id) => `https://www.dtdc.com/tracking?awbNo=${id}`,
+  Ekart: (id) => `https://app.elite.ekartlogistics.in/api/v1/track/${id}`,
+  "Ekart Logistics": (id) => `https://app.elite.ekartlogistics.in/api/v1/track/${id}`,
   Xpressbees: (id) => `https://www.xpressbees.com/track?awb=${id}`,
   "Ecom Express": (id) => `https://ecomexpress.in/tracking/?awb_field=${id}`,
   Shadowfax: (id) => `https://tracker.shadowfax.in/#/tracking/${id}`,

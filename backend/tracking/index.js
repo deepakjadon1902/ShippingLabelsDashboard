@@ -20,11 +20,14 @@ import {
   hasTrackCourierKey,
   TRACKCOURIER_SLUGS,
 } from "./adapters/trackcourier.js";
+import { trackEkart } from "./adapters/ekart.js";
 
 export const AUTO_TRACK_COURIERS = new Set([
   "Delhivery",
   "DTDC",
   "Shree Maruti Courier",
+  "Ekart",
+  "Ekart Logistics",
   ...Object.keys(TRACKCOURIER_SLUGS),
 ]);
 
@@ -70,6 +73,10 @@ export async function trackShipment(courierName, trackingNumber, options = {}) {
 
   if (courier === "Delhivery") {
     return trackDelhivery(waybill);
+  }
+
+  if (courier === "Ekart" || courier === "Ekart Logistics") {
+    return trackEkart(waybill);
   }
 
   if (TRACKCOURIER_SLUGS[courier]) {

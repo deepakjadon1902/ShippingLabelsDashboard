@@ -123,6 +123,7 @@ function getProviderDisplay(label: Label): string {
     if (label.courier_name?.toLowerCase().includes("dtdc")) return "DTDC Direct";
     if (label.courier_name?.toLowerCase().includes("delhivery")) return "Delhivery Direct";
     if (label.courier_name?.toLowerCase().includes("ekart")) return "Ekart Direct";
+    if (label.courier_name?.toLowerCase().includes("shadowfax")) return "Shadowfax Direct";
     return "Direct";
   }
   if (label.tracking_source === "trackcourier") {

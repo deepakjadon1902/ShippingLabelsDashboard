@@ -21,6 +21,7 @@ import {
   TRACKCOURIER_SLUGS,
 } from "./adapters/trackcourier.js";
 import { trackEkart } from "./adapters/ekart.js";
+import { trackShadowfax, hasShadowfaxToken } from "./adapters/shadowfax.js";
 
 export const AUTO_TRACK_COURIERS = new Set([
   "Delhivery",
@@ -28,6 +29,9 @@ export const AUTO_TRACK_COURIERS = new Set([
   "Shree Maruti Courier",
   "Ekart",
   "Ekart Logistics",
+  "Shadowfax",
+  "India Post",
+  "IndiaPost",
   ...Object.keys(TRACKCOURIER_SLUGS),
 ]);
 
@@ -36,6 +40,7 @@ export function getTrackingCredentialsStatus() {
     delhivery: hasDelhiveryToken(),
     dtdc: hasDtdcToken(),
     trackcourier: hasTrackCourierKey(),
+    shadowfax: hasShadowfaxToken(),
   };
 }
 
@@ -77,6 +82,14 @@ export async function trackShipment(courierName, trackingNumber, options = {}) {
 
   if (courier === "Ekart" || courier === "Ekart Logistics") {
     return trackEkart(waybill);
+  }
+
+  if (courier === "Shadowfax") {
+    return trackShadowfax(waybill, options);
+  }
+
+  if (courier === "India Post" || courier === "IndiaPost") {
+    return fetchTrackCourier("India Post", waybill);
   }
 
   if (TRACKCOURIER_SLUGS[courier]) {

@@ -102,7 +102,7 @@ const TRACKING_URLS: Record<string, (id: string) => string> = {
   "Ekart Logistics": (id) => `https://app.elite.ekartlogistics.in/api/v1/track/${id}`,
   Xpressbees: (id) => `https://www.xpressbees.com/track?awb=${id}`,
   "Ecom Express": (id) => `https://ecomexpress.in/tracking/?awb_field=${id}`,
-  Shadowfax: (id) => `https://tracker.shadowfax.in/#/tracking/${id}`,
+  Shadowfax: (id) => `https://tracker.shadowfax.in/#/track/${id}`,
   "India Post": (id) =>
     `https://www.indiapost.gov.in/_layouts/15/dop.portal.tracking/trackconsignment.aspx?consignment=${id}`,
 };

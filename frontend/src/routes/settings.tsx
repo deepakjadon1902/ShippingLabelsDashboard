@@ -339,9 +339,9 @@ function SettingsPage() {
                 note="Direct API. Used for labels where Courier = DTDC."
               />
               <CredRow
-                label="TrackingMore API key"
-                configured={!!creds?.trackingmore}
-                note="Unified tracker for Shadowfax, Xpressbees, Ecom Express, India Post, Shree Maruti."
+                label="TrackCourier.io API key"
+                configured={!!creds?.trackcourier}
+                note="Unified fallback tracker for DTDC and other supported carriers."
               />
             </>
           )}

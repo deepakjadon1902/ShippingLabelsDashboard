@@ -36,3 +36,5 @@ creates a short-lived, single-use URL for one existing label. Opening that URL
 atomically consumes it, creates the normal labels session, and redirects to
 `/print?ids=<label-id>`. Handoff tokens are hashed in MongoDB and redacted from
 access logs.
+###
+Test

@@ -9,6 +9,7 @@
     "dev:watch": "nodemon server.js",
     "start": "node server.js",
     "check": "node --check server.js",
+    "test": "node --test tests/*.test.js",
     "tracking:sync": "node scripts/sync-tracking.js"
   },
   "dependencies": {

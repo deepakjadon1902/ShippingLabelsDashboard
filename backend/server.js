@@ -7,6 +7,13 @@ import mongoose from "mongoose";
 import morgan from "morgan";
 import { Label, STATUSES } from "./models/Label.js";
 import {
+  buildLabelPrintUrl,
+  buildPrintHandoffRedeemUrl,
+  isValidPrintHandoffToken,
+  normalizePrintHandoffTtl,
+  redactPrintHandoffUrl,
+} from "./lib/printHandoffs.js";
+import {
   AUTO_TRACK_COURIERS,
   getTrackingCredentialsStatus,
   refreshOneLabel,
@@ -32,6 +39,11 @@ const CLIENT_ORIGINS = [
 const ALLOWED_CLIENT_ORIGINS = new Set(CLIENT_ORIGINS);
 const SESSION_COOKIE = "brajmart_session";
 const SESSION_DAYS = 7;
+const PRINT_HANDOFF_TTL_SECONDS = normalizePrintHandoffTtl(process.env.PRINT_HANDOFF_TTL_SECONDS);
+const PUBLIC_APP_URL = String(
+  process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL || "https://labels.brajmart.com",
+).replace(/\/$/, "");
+const PUBLIC_API_URL = String(process.env.PUBLIC_API_URL || PUBLIC_APP_URL).replace(/\/$/, "");
 const IS_HOSTED_PRODUCTION =
   process.env.NODE_ENV === "production" ||
   process.env.RENDER === "true" ||
@@ -75,6 +87,17 @@ const sessionSchema = new mongoose.Schema(
   { versionKey: false },
 );
 
+const printHandoffSchema = new mongoose.Schema(
+  {
+    token_hash: { type: String, required: true, unique: true, index: true },
+    user_id: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "User", index: true },
+    label_id: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "Label", index: true },
+    expires_at: { type: Date, required: true, expires: 0 },
+    created_at: { type: Date, default: Date.now },
+  },
+  { versionKey: false },
+);
+
 const senderProfileSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -104,9 +127,11 @@ senderProfileSchema.index({ sort_order: 1, created_at: 1 });
 
 const User = mongoose.model("User", userSchema);
 const Session = mongoose.model("Session", sessionSchema);
+const PrintHandoff = mongoose.model("PrintHandoff", printHandoffSchema);
 const SenderProfile = mongoose.model("SenderProfile", senderProfileSchema);
 
 const app = express();
+app.set("trust proxy", 1);
 
 app.use(
   cors({
@@ -121,7 +146,13 @@ app.use(
 );
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
-app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
+morgan.token("safe-url", (req) => {
+  return redactPrintHandoffUrl(req.originalUrl || req.url);
+});
+const accessLogFormat = IS_HOSTED_PRODUCTION
+  ? ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'
+  : ":method :safe-url :status :response-time ms - :res[content-length]";
+app.use(morgan(accessLogFormat));
 app.use((req, _res, next) => {
   if (req.url === "/api/v1") req.url = "/api";
   else if (req.url.startsWith("/api/v1/")) req.url = `/api/${req.url.slice("/api/v1/".length)}`;
@@ -358,6 +389,70 @@ app.post(
     if (token) await Session.deleteOne({ token_hash: hashSecret(token) });
     res.clearCookie(SESSION_COOKIE, { path: "/" });
     res.json({ ok: true });
+  }),
+);
+
+app.post(
+  "/api/auth/print-handoffs",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const labelId = String(req.body?.label_id || "").trim();
+    if (!mongoose.isValidObjectId(labelId)) {
+      return res.status(400).json({ error: "A valid label_id is required" });
+    }
+    if (!(await Label.exists({ _id: labelId }))) {
+      return res.status(404).json({ error: "Label not found" });
+    }
+
+    const token = createToken();
+    await PrintHandoff.create({
+      token_hash: hashSecret(token),
+      user_id: req.user.id,
+      label_id: labelId,
+      expires_at: new Date(Date.now() + PRINT_HANDOFF_TTL_SECONDS * 1000),
+    });
+
+    const redeemUrl = buildPrintHandoffRedeemUrl(PUBLIC_API_URL, token);
+    res.set("Cache-Control", "no-store");
+    res.status(201).json({ redeem_url: redeemUrl, expires_in: PRINT_HANDOFF_TTL_SECONDS });
+  }),
+);
+
+app.get(
+  "/api/auth/print-handoffs/redeem",
+  asyncHandler(async (req, res) => {
+    const token = String(req.query?.token || "").trim();
+    res.set("Cache-Control", "no-store");
+    res.set("Referrer-Policy", "no-referrer");
+    if (!isValidPrintHandoffToken(token)) {
+      return res.status(400).send("Invalid print handoff");
+    }
+
+    const handoff = await PrintHandoff.findOneAndDelete({
+      token_hash: hashSecret(token),
+      expires_at: { $gt: new Date() },
+    }).lean();
+    if (!handoff) {
+      return res.status(410).send("This print link has expired or has already been used");
+    }
+
+    const [userExists, labelExists] = await Promise.all([
+      User.exists({ _id: handoff.user_id }),
+      Label.exists({ _id: handoff.label_id }),
+    ]);
+    if (!userExists || !labelExists) {
+      return res.status(410).send("This print link is no longer available");
+    }
+
+    const sessionToken = createToken();
+    await Session.create({
+      user_id: handoff.user_id,
+      token_hash: hashSecret(sessionToken),
+      expires_at: new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000),
+    });
+    res.cookie(SESSION_COOKIE, sessionToken, cookieOptions());
+
+    res.redirect(302, buildLabelPrintUrl(PUBLIC_APP_URL, handoff.label_id.toString()));
   }),
 );
 

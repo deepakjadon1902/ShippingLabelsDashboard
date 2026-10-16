@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import express from "express";
 import mongoose from "mongoose";
 import morgan from "morgan";
-import { Label, STATUSES } from "./models/Label.js";
 import {
   buildLabelPrintUrl,
   buildPrintHandoffRedeemUrl,
@@ -13,11 +12,12 @@ import {
   normalizePrintHandoffTtl,
   redactPrintHandoffUrl,
 } from "./lib/printHandoffs.js";
+import { Label, STATUSES } from "./models/Label.js";
 import {
   AUTO_TRACK_COURIERS,
   getTrackingCredentialsStatus,
-  refreshOneLabel,
   getMarutiGlobalCooldown,
+  refreshOneLabel,
 } from "./tracking/index.js";
 
 dotenv.config();

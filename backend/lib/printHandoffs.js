@@ -13,30 +13,36 @@ function httpBaseUrl(value, name) {
   } catch {
     throw new Error(`${name} must be an absolute HTTP(S) URL`);
   }
-  if (!['http:', 'https:'].includes(url.protocol)) {
+  if (!["http:", "https:"].includes(url.protocol)) {
     throw new Error(`${name} must be an absolute HTTP(S) URL`);
   }
   return url;
 }
 
 export function buildPrintHandoffRedeemUrl(publicApiUrl, token) {
-  const url = new URL('/api/v1/auth/print-handoffs/redeem', httpBaseUrl(publicApiUrl, 'PUBLIC_API_URL'));
-  url.searchParams.set('token', token);
+  const url = new URL(
+    "/api/v1/auth/print-handoffs/redeem",
+    httpBaseUrl(publicApiUrl, "PUBLIC_API_URL"),
+  );
+  url.searchParams.set("token", token);
   return url.toString();
 }
 
 export function buildLabelPrintUrl(publicAppUrl, labelId) {
-  const url = new URL('/print', httpBaseUrl(publicAppUrl, 'PUBLIC_APP_URL'));
-  url.searchParams.set('ids', labelId);
+  const url = new URL("/print", httpBaseUrl(publicAppUrl, "PUBLIC_APP_URL"));
+  url.searchParams.set("ids", labelId);
   return url.toString();
 }
 
 export function isValidPrintHandoffToken(value) {
-  return /^[a-f0-9]{64}$/i.test(String(value || ''));
+  return /^[a-f0-9]{64}$/i.test(String(value || ""));
 }
 
 export function redactPrintHandoffUrl(value) {
-  const url = String(value || '');
+  const url = String(value || "");
   if (!/\/auth\/print-handoffs\/redeem(?:\?|$)/.test(url)) return url;
-  return url.replace(/(\/auth\/print-handoffs\/redeem)(?:\?[^#]*)?/, '$1?token=[REDACTED]');
+  return url.replace(
+    /(\/auth\/print-handoffs\/redeem)(?:\?[^#]*)?/,
+    "$1?token=[REDACTED]",
+  );
 }

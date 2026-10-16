@@ -161,4 +161,3 @@ runSync().catch((err) => {
   console.error("Unhandled exception:", err);
   process.exit(1);
 });
-

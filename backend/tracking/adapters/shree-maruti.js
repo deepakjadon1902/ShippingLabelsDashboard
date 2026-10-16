@@ -244,7 +244,7 @@ export async function trackShreeMaruti(trackingNumber, options = {}) {
 
     // Process Statuses & Checkpoint History
     const rawStatuses = Array.isArray(data.statuses) ? data.statuses : [];
-    
+
     // Sort descending by timestamp (newest first)
     const sortedStatuses = [...rawStatuses].sort((a, b) => {
       const ta = Number(a.statusTimestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0));

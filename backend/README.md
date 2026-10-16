@@ -36,3 +36,8 @@ creates a short-lived, single-use URL for one existing label. Opening that URL
 atomically consumes it, creates the normal labels session, and redirects to
 `/print?ids=<label-id>`. Handoff tokens are hashed in MongoDB and redacted from
 access logs.
+
+### Tests
+
+Run `npm test` to verify print URL generation, token validation, expiry limits,
+and access-log redaction. Run `npm run check` to check the server syntax.

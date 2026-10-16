@@ -217,5 +217,3 @@ export async function trackDTDC(trackingNumber, options = {}) {
     })
   );
 }
-
-

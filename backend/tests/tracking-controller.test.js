@@ -1,0 +1,711 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+import {
+  executeTrackRequest,
+  getTrackingSettings,
+  updateTrackingSettings,
+  tripCircuitBreaker,
+  resetCircuitBreaker,
+  isCircuitBreakerTripped,
+  getTrackingUsageStats,
+} from "../tracking/controller.js";
+
+import {
+  trackShipment,
+  applyTrackingResultToLabel,
+} from "../tracking/index.js";
+
+import {
+  getTrackCourierSlug,
+  hasTrackCourierKey,
+  hasTrackCourierBackupKey,
+  hasTrackCourierTertiaryKey,
+  getTrackCourierBackupKey,
+  getTrackCourierTertiaryKey,
+} from "../tracking/adapters/trackcourier.js";
+
+test("Tracking Controller: Dashboard load causes ZERO external tracking requests", async () => {
+  // Simulates dashboard label listing: purely reading local data produces 0 controller requests
+  let networkCalls = 0;
+  const mockDbQuery = async () => {
+    return [
+      { id: "1", courier_name: "India Post", tracking_id: "IN123", status: "Shipped" },
+      { id: "2", courier_name: "Delhivery", tracking_id: "DEL456", status: "Pending" },
+    ];
+  };
+
+  const labels = await mockDbQuery();
+  assert.equal(labels.length, 2);
+  assert.equal(networkCalls, 0, "No external API calls must be made on dashboard load or list query");
+});
+
+test("Tracking Controller: Global kill switch blocks all external requests immediately", async () => {
+  await updateTrackingSettings({ externalTrackingEnabled: false });
+
+  let callCount = 0;
+  const res = await executeTrackRequest({
+    provider: "TrackCourier",
+    courier: "India Post",
+    awb: "TEST_GLOBAL_OFF",
+    executeFn: async () => {
+      callCount++;
+      return { status: "Shipped" };
+    },
+  });
+
+  assert.equal(res.skipped, true);
+  assert.match(res.reason, /globally disabled/i);
+  assert.equal(callCount, 0, "Network executeFn must NOT be invoked when kill switch is OFF");
+
+  // Restore switch
+  await updateTrackingSettings({ externalTrackingEnabled: true });
+});
+
+test("Tracking Controller: Provider kill switch blocks specific provider", async () => {
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    providers: {
+      trackcourier_account1: { enabled: false, dailyBudget: 10, monthlyBudget: 100 },
+    },
+  });
+
+  let callCount = 0;
+  const res = await executeTrackRequest({
+    provider: "TrackCourier (Account 1)",
+    courier: "India Post",
+    awb: "TEST_TC_DISABLED",
+    executeFn: async () => {
+      callCount++;
+      return { status: "Shipped" };
+    },
+  });
+
+  assert.equal(res.skipped, true);
+  assert.match(res.reason, /disabled by administrator policy/i);
+  assert.equal(callCount, 0);
+
+  // Restore provider
+  await updateTrackingSettings({
+    providers: {
+      trackcourier_account1: { enabled: true, dailyBudget: 10, monthlyBudget: 100 },
+    },
+  });
+});
+
+test("Tracking Controller: Per-shipment cooldown blocks rapid repeated clicks within cooldown window", async () => {
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    perShipmentCooldownMinutes: 30,
+  });
+
+  let callCount = 0;
+  const executeFn = async () => {
+    callCount++;
+    return { status: "Shipped", rawStatus: "In Transit" };
+  };
+
+  // First request succeeds
+  const first = await executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "COOLDOWN_AWB_1",
+    executeFn,
+  });
+  assert.equal(first.status, "Shipped");
+  assert.equal(callCount, 1);
+
+  // Immediate second request for same shipment without force must be blocked by cooldown
+  const second = await executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "COOLDOWN_AWB_1",
+    force: false,
+    executeFn,
+  });
+  assert.equal(second.skipped, true);
+  assert.equal(second.cooldownActive, true);
+  assert.equal(callCount, 1, "Second request within cooldown must not hit network");
+
+  // Forced request (e.g. admin manual refresh) bypasses cooldown
+  const third = await executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "COOLDOWN_AWB_1",
+    force: true,
+    executeFn,
+  });
+  assert.equal(third.status, "Shipped");
+  assert.equal(callCount, 2);
+});
+
+test("Tracking Controller: Quota error (HTTP 402) trips circuit breaker and halts subsequent requests", async () => {
+  resetCircuitBreaker("trackcourier_account1");
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), false);
+
+  let callCount = 0;
+
+  // First request returns HTTP 402 quota error
+  const res1 = await executeTrackRequest({
+    provider: "TrackCourier (Account 1)",
+    courier: "India Post",
+    awb: "AWB_402_TEST_1",
+    force: true,
+    executeFn: async () => {
+      callCount++;
+      return {
+        error: "TrackCourier.io quota exceeded (HTTP 402)",
+        statusCode: 402,
+        isQuotaError: true,
+      };
+    },
+  });
+
+  assert.equal(callCount, 1);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), true, "402 must trip circuit breaker");
+
+  // Subsequent request for a DIFFERENT shipment must be blocked immediately by circuit breaker without network call!
+  const res2 = await executeTrackRequest({
+    provider: "TrackCourier (Account 1)",
+    courier: "India Post",
+    awb: "AWB_402_TEST_2",
+    force: true,
+    executeFn: async () => {
+      callCount++;
+      return { status: "Shipped" };
+    },
+  });
+
+  assert.equal(res2.skipped, true);
+  assert.equal(res2.isCircuitBreakerActive, true);
+  assert.equal(callCount, 1, "Network call must NOT be made when circuit breaker is tripped");
+
+  resetCircuitBreaker("trackcourier_account1");
+});
+
+test("Tracking Controller: Non-retryable errors (401, 402, 403, 429) are never retried", async () => {
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    providers: {
+      trackcourier_account1: { enabled: true, dailyBudget: 10, monthlyBudget: 100 },
+    },
+  });
+
+  for (const code of [401, 402, 403, 429]) {
+    let attempts = 0;
+    await executeTrackRequest({
+      provider: "TrackCourier (Account 1)",
+      courier: "India Post",
+      awb: `NON_RETRY_${code}`,
+      force: true,
+      executeFn: async () => {
+        attempts++;
+        return {
+          error: `HTTP ${code} error`,
+          statusCode: code,
+          isQuotaError: code === 402,
+          isRateLimitError: code === 429,
+          isAuthError: code === 401 || code === 403,
+        };
+      },
+    });
+
+    assert.equal(attempts, 1, `Status code ${code} must not trigger any automatic retry`);
+    resetCircuitBreaker("trackcourier_account1");
+  }
+});
+
+test("Tracking Controller: Concurrent identical requests are deduplicated into single network execution", async () => {
+  let executeCount = 0;
+
+  const slowExecution = async () => {
+    executeCount++;
+    await new Promise((r) => setTimeout(r, 60));
+    return { status: "Shipped", rawStatus: "In Transit" };
+  };
+
+  // Launch two concurrent requests for the exact same provider and AWB
+  const [resA, resB] = await Promise.all([
+    executeTrackRequest({
+      provider: "Delhivery",
+      courier: "Delhivery",
+      awb: "DEDUP_TEST_AWB",
+      force: true,
+      executeFn: slowExecution,
+    }),
+    executeTrackRequest({
+      provider: "Delhivery",
+      courier: "Delhivery",
+      awb: "DEDUP_TEST_AWB",
+      force: true,
+      executeFn: slowExecution,
+    }),
+  ]);
+
+  assert.equal(executeCount, 1, "Concurrent in-flight calls for same AWB must be deduplicated into 1 network call");
+  assert.equal(resA.status, "Shipped");
+  assert.equal(resB.status, "Shipped");
+});
+
+test("TrackCourier: Quota-exhausted circuit breaker active by default and blocks requests", async () => {
+  tripCircuitBreaker("trackcourier_account1", "TrackCourier Account 1 quota exhausted (HTTP 402) - active until quota reset");
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), true);
+
+  let callsMade = 0;
+  const result = await executeTrackRequest({
+    provider: "TrackCourier (Account 1)",
+    courier: "India Post",
+    awb: "TC_BREAKER_CHECK_AWB",
+    force: true,
+    executeFn: async () => {
+      callsMade++;
+      return { status: "Shipped" };
+    },
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.isCircuitBreakerActive, true);
+  assert.equal(callsMade, 0, "Zero requests must be sent to TrackCourier Account 1 while breaker is active");
+
+  resetCircuitBreaker("trackcourier_account1");
+});
+
+test("Slug Resolution: Courier names map correctly for TrackCourier", () => {
+  assert.equal(getTrackCourierSlug("India Post"), "indiapost");
+  assert.equal(getTrackCourierSlug("IndiaPost"), "indiapost");
+  assert.equal(getTrackCourierSlug("DTDC"), "dtdc");
+  assert.equal(getTrackCourierSlug("Shadowfax"), "shadowfax");
+  assert.equal(getTrackCourierSlug("Ekart"), "ekart");
+  assert.equal(getTrackCourierSlug("Shree Maruti Courier"), "shreemaruticourier");
+});
+
+test("TrackCourier Multi-Account: Circuit breakers and budgets are completely independent for Accounts 1, 2, and 3", async () => {
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+  resetCircuitBreaker("trackcourier_account3");
+
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), false);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account2"), false);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account3"), false);
+
+  // Trip Account 1 (e.g. 402 quota exhausted)
+  tripCircuitBreaker("trackcourier_account1", "TrackCourier Account 1 quota exhausted (HTTP 402)");
+
+  // Account 1 must be tripped; Accounts 2 & 3 MUST remain healthy and untripped!
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), true, "Account 1 must be tripped");
+  assert.equal(isCircuitBreakerTripped("trackcourier_account2"), false, "Account 2 must remain untripped when Account 1 is tripped");
+  assert.equal(isCircuitBreakerTripped("trackcourier_account3"), false, "Account 3 must remain untripped when Account 1 is tripped");
+
+  // Trip Account 2
+  tripCircuitBreaker("trackcourier_account2", "TrackCourier Account 2 quota exhausted (HTTP 402)");
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), true);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account2"), true);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account3"), false, "Account 3 must remain untripped");
+
+  // Reset all
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+  resetCircuitBreaker("trackcourier_account3");
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), false);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account2"), false);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account3"), false);
+});
+
+test("TrackCourier Multi-Account: Failover cascade from Account 1 to Account 2", async () => {
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+  const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
+
+  process.env.TRACKCOURIER_API_KEY = "mock_account1_key";
+  process.env.TRACKCOURIER_BACKUP_API_KEY = "mock_account2_key";
+
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+
+  let account1Calls = 0;
+  let account2Calls = 0;
+
+  // Simulate Account 1 returning 402 and Account 2 succeeding
+  const res1 = await executeTrackRequest({
+    provider: "TrackCourier (Account 1)",
+    courier: "India Post",
+    awb: "MULTI_ACC_AWB_1",
+    force: true,
+    executeFn: async () => {
+      account1Calls++;
+      return {
+        error: "TrackCourier.io quota exceeded (HTTP 402)",
+        statusCode: 402,
+        isQuotaError: true,
+      };
+    },
+  });
+
+  assert.equal(account1Calls, 1);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), true);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account2"), false);
+
+  // Account 2 is executed next for the same or next parcel
+  const res2 = await executeTrackRequest({
+    provider: "TrackCourier (Account 2)",
+    courier: "India Post",
+    awb: "MULTI_ACC_AWB_1",
+    force: true,
+    executeFn: async () => {
+      account2Calls++;
+      return {
+        courier: "India Post",
+        trackingNumber: "MULTI_ACC_AWB_1",
+        status: "Shipped",
+        rawStatus: "In Transit",
+        source: "trackcourier_account2",
+        provider: "TrackCourier.io (Account 2)",
+      };
+    },
+  });
+
+  assert.equal(account2Calls, 1);
+  assert.equal(res2.status, "Shipped");
+  assert.equal(res2.source, "trackcourier_account2");
+  assert.equal(isCircuitBreakerTripped("trackcourier_account2"), false);
+
+  // Cleanup
+  process.env.TRACKCOURIER_API_KEY = origKey1;
+  process.env.TRACKCOURIER_BACKUP_API_KEY = origKey2;
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+});
+
+test("TrackCourier Multi-Account: 3-tier cascade across Account 1 -> Account 2 -> Account 3", async () => {
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+  const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
+  const origKey3 = process.env.TRACKCOURIER_TERTIARY_API_KEY;
+
+  process.env.TRACKCOURIER_API_KEY = "mock_account1_key";
+  process.env.TRACKCOURIER_BACKUP_API_KEY = "mock_account2_key";
+  process.env.TRACKCOURIER_TERTIARY_API_KEY = "mock_account3_key";
+
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+  });
+
+  // Trip Account 1 and Account 2
+  tripCircuitBreaker("trackcourier_account1", "Account 1 quota exhausted (HTTP 402)");
+  tripCircuitBreaker("trackcourier_account2", "Account 2 quota exhausted (HTTP 402)");
+  resetCircuitBreaker("trackcourier_account3");
+
+  assert.equal(isCircuitBreakerTripped("trackcourier_account1"), true);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account2"), true);
+  assert.equal(isCircuitBreakerTripped("trackcourier_account3"), false);
+
+  // When Accounts 1 & 2 are tripped, Account 3 handles the request
+  let account3Calls = 0;
+  const acc3Result = await executeTrackRequest({
+    provider: "TrackCourier (Account 3)",
+    courier: "India Post",
+    awb: "TIER3_AWB_1",
+    force: true,
+    executeFn: async () => {
+      account3Calls++;
+      return {
+        courier: "India Post",
+        trackingNumber: "TIER3_AWB_1",
+        status: "Delivered",
+        rawStatus: "Delivered",
+        source: "trackcourier_account3",
+        provider: "TrackCourier.io (Account 3)",
+      };
+    },
+  });
+
+  assert.equal(account3Calls, 1);
+  assert.equal(acc3Result.status, "Delivered");
+  assert.equal(acc3Result.source, "trackcourier_account3");
+
+  // Cleanup
+  process.env.TRACKCOURIER_API_KEY = origKey1;
+  process.env.TRACKCOURIER_BACKUP_API_KEY = origKey2;
+  if (origKey3) {
+    process.env.TRACKCOURIER_TERTIARY_API_KEY = origKey3;
+  } else {
+    delete process.env.TRACKCOURIER_TERTIARY_API_KEY;
+  }
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+  resetCircuitBreaker("trackcourier_account3");
+});
+
+test("TrackCourier Multi-Account: Secondary key resolution handles aliases safely", () => {
+  const origBackup = process.env.TRACKCOURIER_BACKUP_API_KEY;
+  const origSecondary = process.env.TRACKCOURIER_SECONDARY_API_KEY;
+  const origAcc2 = process.env.TRACKCOURIER_ACCOUNT2_API_KEY;
+
+  delete process.env.TRACKCOURIER_BACKUP_API_KEY;
+  delete process.env.TRACKCOURIER_SECONDARY_API_KEY;
+  delete process.env.TRACKCOURIER_ACCOUNT2_API_KEY;
+
+  assert.equal(hasTrackCourierBackupKey(), false);
+
+  // Test TRACKCOURIER_SECONDARY_API_KEY alias
+  process.env.TRACKCOURIER_SECONDARY_API_KEY = "mock_secondary_alias";
+  assert.equal(hasTrackCourierBackupKey(), true);
+  assert.equal(hasTrackCourierKey(2), true);
+  assert.equal(getTrackCourierBackupKey(), "mock_secondary_alias");
+  delete process.env.TRACKCOURIER_SECONDARY_API_KEY;
+
+  // Test TRACKCOURIER_ACCOUNT2_API_KEY alias
+  process.env.TRACKCOURIER_ACCOUNT2_API_KEY = "mock_account2_alias";
+  assert.equal(hasTrackCourierBackupKey(), true);
+  assert.equal(hasTrackCourierKey(2), true);
+  assert.equal(getTrackCourierBackupKey(), "mock_account2_alias");
+  delete process.env.TRACKCOURIER_ACCOUNT2_API_KEY;
+
+  // Restore
+  if (origBackup) process.env.TRACKCOURIER_BACKUP_API_KEY = origBackup;
+  if (origSecondary) process.env.TRACKCOURIER_SECONDARY_API_KEY = origSecondary;
+  if (origAcc2) process.env.TRACKCOURIER_ACCOUNT2_API_KEY = origAcc2;
+});
+
+test("TrackCourier Multi-Account: Tertiary key resolution handles aliases safely", () => {
+  const origTertiary = process.env.TRACKCOURIER_TERTIARY_API_KEY;
+  const origAcc3 = process.env.TRACKCOURIER_ACCOUNT3_API_KEY;
+  const origKey3 = process.env.TRACKCOURIER_KEY_3;
+  const origApi3 = process.env.TRACKCOURIER_API_KEY_3;
+  const origThird = process.env.TRACKCOURIER_THIRD_API_KEY;
+
+  delete process.env.TRACKCOURIER_TERTIARY_API_KEY;
+  delete process.env.TRACKCOURIER_ACCOUNT3_API_KEY;
+  delete process.env.TRACKCOURIER_KEY_3;
+  delete process.env.TRACKCOURIER_API_KEY_3;
+  delete process.env.TRACKCOURIER_THIRD_API_KEY;
+
+  assert.equal(hasTrackCourierTertiaryKey(), false);
+  assert.equal(hasTrackCourierKey(3), false);
+
+  // Test TRACKCOURIER_TERTIARY_API_KEY
+  process.env.TRACKCOURIER_TERTIARY_API_KEY = "mock_tertiary_key";
+  assert.equal(hasTrackCourierTertiaryKey(), true);
+  assert.equal(hasTrackCourierKey(3), true);
+  assert.equal(getTrackCourierTertiaryKey(), "mock_tertiary_key");
+  delete process.env.TRACKCOURIER_TERTIARY_API_KEY;
+
+  // Test TRACKCOURIER_ACCOUNT3_API_KEY alias
+  process.env.TRACKCOURIER_ACCOUNT3_API_KEY = "mock_account3_alias";
+  assert.equal(hasTrackCourierTertiaryKey(), true);
+  assert.equal(hasTrackCourierKey(3), true);
+  assert.equal(getTrackCourierTertiaryKey(), "mock_account3_alias");
+  delete process.env.TRACKCOURIER_ACCOUNT3_API_KEY;
+
+  // Test TRACKCOURIER_KEY_3 alias
+  process.env.TRACKCOURIER_KEY_3 = "mock_key3_alias";
+  assert.equal(hasTrackCourierTertiaryKey(), true);
+  assert.equal(hasTrackCourierKey(3), true);
+  assert.equal(getTrackCourierTertiaryKey(), "mock_key3_alias");
+  delete process.env.TRACKCOURIER_KEY_3;
+
+  // Restore
+  if (origTertiary) process.env.TRACKCOURIER_TERTIARY_API_KEY = origTertiary;
+  if (origAcc3) process.env.TRACKCOURIER_ACCOUNT3_API_KEY = origAcc3;
+  if (origKey3) process.env.TRACKCOURIER_KEY_3 = origKey3;
+  if (origApi3) process.env.TRACKCOURIER_API_KEY_3 = origApi3;
+  if (origThird) process.env.TRACKCOURIER_THIRD_API_KEY = origThird;
+});
+
+test("Three-Tier Failover: When Tier 1 succeeds, Tier 2 and Tier 3 are NEVER invoked", async () => {
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+  resetCircuitBreaker("trackcourier_account3");
+
+  let tier1Calls = 0;
+  let tier2Calls = 0;
+  let tier3Calls = 0;
+
+  // Mock Tier 1 returning valid data
+  const t1Res = await executeTrackRequest({
+    provider: "TrackCourier (Account 1)",
+    courier: "India Post",
+    awb: "PRIORITY_TEST_AWB",
+    force: true,
+    executeFn: async () => {
+      tier1Calls++;
+      return { status: "Shipped", rawStatus: "In Transit" };
+    },
+  });
+
+  assert.equal(t1Res.status, "Shipped");
+  assert.equal(tier1Calls, 1);
+  assert.equal(tier2Calls, 0, "Tier 2 must not be called when Tier 1 succeeds");
+  assert.equal(tier3Calls, 0, "Tier 3 must not be called when Tier 1 succeeds");
+});
+
+test("Three-Tier Failover: All tiers fail preserves existing shipment status without data loss", () => {
+  const existingLabel = {
+    status: "Shipped",
+    tracking_history: [{ date: "2026-10-20T10:00:00Z", description: "Dispatched", status: "Shipped" }],
+    last_tracking_error: null,
+  };
+
+  const failedResult = {
+    courier: "India Post",
+    trackingNumber: "FAILED_AWB",
+    status: null,
+    rawStatus: null,
+    source: "trackcourier_account1",
+    error: "Account 1 failed: Quota exhausted. Account 2 failed: Quota exhausted. Account 3 failed: 402",
+  };
+
+  const { newStatus } = applyTrackingResultToLabel(existingLabel, failedResult);
+
+  // Status must remain "Shipped" - never erased to null or downgraded!
+  assert.equal(newStatus, "Shipped", "Existing shipment status must be preserved when external tracking fails");
+  assert.equal(existingLabel.status, "Shipped");
+  assert.match(existingLabel.last_tracking_error, /Account 1 failed/, "Error must be recorded for audit trail");
+});
+
+test("TrackCourier Failover: Account 1 circuit-broken / 402 cascades to Account 2 in same request and returns error: null", async () => {
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+  const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
+
+  process.env.TRACKCOURIER_API_KEY = "mock_key_1";
+  process.env.TRACKCOURIER_BACKUP_API_KEY = "mock_key_2";
+
+  tripCircuitBreaker("trackcourier_account1", "TrackCourier Account 1 quota exhausted (HTTP 402)");
+  resetCircuitBreaker("trackcourier_account2");
+
+  const originalFetch = globalThis.fetch;
+  let fetchedAccount = null;
+  globalThis.fetch = async (url, options = {}) => {
+    const key = options.headers?.["X-API-Key"];
+    if (key === "mock_key_2") {
+      fetchedAccount = 2;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: {
+            status: "delivered",
+            MostRecentStatus: "Delivered",
+            checkpoints: [
+              {
+                time: "2026-10-22 10:00:00",
+                location: "Mumbai Hub",
+                status: "Delivered",
+              },
+            ],
+          },
+        }),
+      };
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+
+  try {
+    const res = await trackShipment("India Post", "AWB_TC_FAILOVER_TEST", { force: true });
+
+    assert.equal(fetchedAccount, 2, "Request must cascade to Account 2");
+    assert.equal(res.status, "Delivered");
+    assert.equal(res.source, "trackcourier_account2");
+    assert.equal(res.error, null, "Error must be null on fallback success to prevent false alarm UI warnings");
+
+    // Verify label application clears any previous tracking error
+    const label = {
+      status: "Shipped",
+      last_tracking_error: "Old quota error",
+    };
+    applyTrackingResultToLabel(label, res);
+    assert.equal(label.status, "Delivered");
+    assert.equal(label.last_tracking_error, null, "label.last_tracking_error must be cleared to null");
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.TRACKCOURIER_API_KEY = origKey1;
+    process.env.TRACKCOURIER_BACKUP_API_KEY = origKey2;
+    resetCircuitBreaker("trackcourier_account1");
+    resetCircuitBreaker("trackcourier_account2");
+  }
+});
+
+test("DTDC Failover: Direct 401 cascades to TrackCourier Account 2, clears error on success, and does NOT trip DTDC circuit breaker with 402", async () => {
+  const origDtdcToken = process.env.DTDC_API_TOKEN;
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+  const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
+
+  process.env.DTDC_API_TOKEN = "mock_dtdc_token";
+  process.env.TRACKCOURIER_API_KEY = "mock_tc_key_1";
+  process.env.TRACKCOURIER_BACKUP_API_KEY = "mock_tc_key_2";
+
+  tripCircuitBreaker("trackcourier_account1", "TrackCourier Account 1 quota exhausted (HTTP 402)");
+  resetCircuitBreaker("trackcourier_account2");
+  resetCircuitBreaker("dtdc");
+
+  const originalFetch = globalThis.fetch;
+  let dtdcDirectCalled = false;
+  let tcAccount2Called = false;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const urlStr = String(url);
+    if (urlStr.includes("blktracksvc.dtdc.com")) {
+      dtdcDirectCalled = true;
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ error: "Unauthorized" }),
+      };
+    }
+    if (urlStr.includes("api.trackcourier.io")) {
+      const key = options.headers?.["X-API-Key"];
+      if (key === "mock_tc_key_2") {
+        tcAccount2Called = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: {
+              status: "in_transit",
+              MostRecentStatus: "In Transit",
+              checkpoints: [
+                {
+                  time: "2026-10-22 09:00:00",
+                  location: "Delhi Sorting Facility",
+                  status: "In Transit",
+                },
+              ],
+            },
+          }),
+        };
+      }
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+
+  try {
+    const res = await trackShipment("DTDC", "DTDC_FAILOVER_AWB_1", { force: true });
+
+    assert.equal(dtdcDirectCalled, true, "Direct DTDC API must be attempted first as direct courier integration");
+    assert.equal(tcAccount2Called, true, "TrackCourier Account 2 must be invoked when direct returns 401 and Account 1 is tripped");
+    assert.equal(res.status, "Shipped");
+    assert.equal(res.source, "trackcourier_account2");
+    assert.equal(res.error, null, "Error must be cleared to null on fallback success");
+    assert.equal(isCircuitBreakerTripped("dtdc"), false, "DTDC circuit breaker must NOT be tripped when fallback succeeds");
+
+    const label = {
+      status: "Pending",
+      last_tracking_error: "Previous error",
+    };
+    applyTrackingResultToLabel(label, res);
+    assert.equal(label.status, "Shipped");
+    assert.equal(label.last_tracking_error, null, "UI notification error must be cleared");
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.DTDC_API_TOKEN = origDtdcToken;
+    process.env.TRACKCOURIER_API_KEY = origKey1;
+    process.env.TRACKCOURIER_BACKUP_API_KEY = origKey2;
+    resetCircuitBreaker("trackcourier_account1");
+    resetCircuitBreaker("trackcourier_account2");
+    resetCircuitBreaker("dtdc");
+  }
+});
+

@@ -133,6 +133,7 @@ export function detectRtoStatus(rawInput) {
     raw.includes("rto") ||
     raw.includes("return initiated") ||
     raw.includes("return booked") ||
+    raw.includes("return to origin") ||
     raw.includes("undelivered") ||
     raw.includes("refused")
   ) {

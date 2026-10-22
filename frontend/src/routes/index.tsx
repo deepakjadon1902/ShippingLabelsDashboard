@@ -264,6 +264,8 @@ function Dashboard() {
   const [reportDate, setReportDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [confirmRefreshLabel, setConfirmRefreshLabel] = useState<Label | null>(null);
+  const [confirmSyncAll, setConfirmSyncAll] = useState(false);
   const [journeyLabelId, setJourneyLabelId] = useState<string | null>(null);
 
   const { data: labels = [], isLoading } = useQuery({
@@ -937,7 +939,7 @@ function Dashboard() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => refreshAllMutation.mutate()}
+            onClick={() => setConfirmSyncAll(true)}
             disabled={refreshAllMutation.isPending}
             title="Synchronize real-time tracking for all active parcels"
           >
@@ -1586,7 +1588,11 @@ function Dashboard() {
                 labels={filteredShipments.slice(0, 10)}
                 isLoading={isLoading}
                 onOpenJourney={(id) => setJourneyLabelId(id)}
-                onRefresh={(id) => refreshOneMutation.mutate(id)}
+                onRefresh={(id) => {
+                  const target = labels.find((l) => l.id === id);
+                  if (target) setConfirmRefreshLabel(target);
+                  else refreshOneMutation.mutate(id);
+                }}
                 onStatusChange={(id, status) => statusMutation.mutate({ id, status })}
                 onDelete={(id) => setDeleteId(id)}
                 refreshingId={
@@ -1668,7 +1674,11 @@ function Dashboard() {
                 labels={filteredShipments}
                 isLoading={isLoading}
                 onOpenJourney={(id) => setJourneyLabelId(id)}
-                onRefresh={(id) => refreshOneMutation.mutate(id)}
+                onRefresh={(id) => {
+                  const target = labels.find((l) => l.id === id);
+                  if (target) setConfirmRefreshLabel(target);
+                  else refreshOneMutation.mutate(id);
+                }}
                 onStatusChange={(id, status) => statusMutation.mutate({ id, status })}
                 onDelete={(id) => setDeleteId(id)}
                 refreshingId={
@@ -1714,7 +1724,11 @@ function Dashboard() {
                 labels={filteredShipments}
                 isLoading={isLoading}
                 onOpenJourney={(id) => setJourneyLabelId(id)}
-                onRefresh={(id) => refreshOneMutation.mutate(id)}
+                onRefresh={(id) => {
+                  const target = labels.find((l) => l.id === id);
+                  if (target) setConfirmRefreshLabel(target);
+                  else refreshOneMutation.mutate(id);
+                }}
                 onStatusChange={(id, status) => statusMutation.mutate({ id, status })}
                 onDelete={(id) => setDeleteId(id)}
                 refreshingId={
@@ -1750,7 +1764,11 @@ function Dashboard() {
                 labels={filteredShipments}
                 isLoading={isLoading}
                 onOpenJourney={(id) => setJourneyLabelId(id)}
-                onRefresh={(id) => refreshOneMutation.mutate(id)}
+                onRefresh={(id) => {
+                  const target = labels.find((l) => l.id === id);
+                  if (target) setConfirmRefreshLabel(target);
+                  else refreshOneMutation.mutate(id);
+                }}
                 onStatusChange={(id, status) => statusMutation.mutate({ id, status })}
                 onDelete={(id) => setDeleteId(id)}
                 refreshingId={
@@ -1791,7 +1809,11 @@ function Dashboard() {
                 labels={filteredShipments}
                 isLoading={isLoading}
                 onOpenJourney={(id) => setJourneyLabelId(id)}
-                onRefresh={(id) => refreshOneMutation.mutate(id)}
+                onRefresh={(id) => {
+                  const target = labels.find((l) => l.id === id);
+                  if (target) setConfirmRefreshLabel(target);
+                  else refreshOneMutation.mutate(id);
+                }}
                 onStatusChange={(id, status) => statusMutation.mutate({ id, status })}
                 onDelete={(id) => setDeleteId(id)}
                 refreshingId={
@@ -1946,11 +1968,65 @@ function Dashboard() {
         label={activeJourneyLabel}
         open={!!journeyLabelId}
         onOpenChange={(o) => !o && setJourneyLabelId(null)}
-        onRefresh={(id) => refreshOneMutation.mutate(id)}
+        onRefresh={(id) => {
+                  const target = labels.find((l) => l.id === id);
+                  if (target) setConfirmRefreshLabel(target);
+                  else refreshOneMutation.mutate(id);
+                }}
         refreshing={
           refreshOneMutation.isPending && refreshOneMutation.variables === activeJourneyLabel?.id
         }
       />
+
+      {/* Single Label Refresh Confirmation Alert */}
+      <AlertDialog open={!!confirmRefreshLabel} onOpenChange={(o) => !o && setConfirmRefreshLabel(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Refresh Live Courier Tracking?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Querying {confirmRefreshLabel?.courier_name} (AWB: {confirmRefreshLabel?.tracking_id}) will consume 1 third-party request from your configured monthly quota.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={refreshOneMutation.isPending}
+              onClick={() => {
+                if (confirmRefreshLabel) {
+                  refreshOneMutation.mutate(confirmRefreshLabel.id);
+                  setConfirmRefreshLabel(null);
+                }
+              }}
+            >
+              {refreshOneMutation.isPending ? "Refreshing..." : "Confirm & Query API"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Sync All Couriers Confirmation Alert */}
+      <AlertDialog open={confirmSyncAll} onOpenChange={setConfirmSyncAll}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Synchronize Active Couriers?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This bulk operation queries upstream courier APIs for active parcels (batch-limited to protect monthly quotas). Each parcel queried will consume 1 third-party API request.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={refreshAllMutation.isPending}
+              onClick={() => {
+                refreshAllMutation.mutate();
+                setConfirmSyncAll(false);
+              }}
+            >
+              {refreshAllMutation.isPending ? "Syncing..." : "Confirm Bulk Sync"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirmation Alert */}
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>

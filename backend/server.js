@@ -13,14 +13,24 @@ import {
   redactPrintHandoffUrl,
 } from "./lib/printHandoffs.js";
 import { Label, STATUSES } from "./models/Label.js";
+import { TrackingLedger } from "./models/TrackingLedger.js";
 import {
   AUTO_TRACK_COURIERS,
   getTrackingCredentialsStatus,
   getMarutiGlobalCooldown,
   refreshOneLabel,
+  normalizeShadowfaxWebhookPayload,
+  getTrackingSettings,
+  updateTrackingSettings,
+  getTrackingUsageStats,
+  resetCircuitBreaker,
 } from "./tracking/index.js";
 
-dotenv.config();
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const PORT = Number(process.env.PORT || 5000);
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/brajmart_shipping_labels";
@@ -562,6 +572,47 @@ app.get("/api/tracking/credentials", requireAuth, (_req, res) => {
   res.json(getTrackingCredentialsStatus());
 });
 
+app.get(
+  "/api/tracking/admin/controls",
+  requireAuth,
+  asyncHandler(async (_req, res) => {
+    res.json(await getTrackingUsageStats());
+  }),
+);
+
+app.post(
+  "/api/tracking/admin/controls",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await updateTrackingSettings(req.body);
+    res.json(await getTrackingUsageStats());
+  }),
+);
+
+app.post(
+  "/api/tracking/admin/reset-circuit-breaker",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { provider } = req.body;
+    if (!provider) return res.status(400).json({ error: "Provider is required" });
+    resetCircuitBreaker(provider);
+    res.json({ ok: true, provider, stats: await getTrackingUsageStats() });
+  }),
+);
+
+app.get(
+  "/api/tracking/admin/ledger",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit || 50)));
+    const filter = {};
+    if (req.query.provider) filter.provider = req.query.provider;
+    if (req.query.success !== undefined) filter.success = req.query.success === "true";
+    const items = await TrackingLedger.find(filter).sort({ timestamp: -1 }).limit(limit);
+    res.json(items);
+  }),
+);
+
 app.post(
   "/api/tracking/labels/:id/refresh",
   requireAuth,
@@ -590,6 +641,10 @@ app.post(
   "/api/tracking/refresh-all",
   requireAuth,
   asyncHandler(async (_req, res) => {
+    const settings = getTrackingSettings();
+    if (!settings.externalTrackingEnabled) {
+      return res.status(403).json({ error: "External tracking is globally disabled" });
+    }
     res.json(await refreshAllLabels());
   }),
 );
@@ -602,7 +657,63 @@ app.post(
       const headerSecret = req.get("x-hook-secret") || req.query.secret;
       if (headerSecret !== configuredSecret) return res.status(401).json({ error: "Unauthorized" });
     }
+    const settings = getTrackingSettings();
+    if (!settings.scheduledSyncEnabled) {
+      return res.status(403).json({
+        ok: false,
+        error: "Scheduled bulk tracking sync is currently disabled by administrator configuration.",
+      });
+    }
     res.json(await refreshAllLabels());
+  }),
+);
+
+// Dedicated Shadowfax Push Webhook Callback Endpoint (Idempotent status updates)
+app.post(
+  "/api/webhooks/shadowfax",
+  asyncHandler(async (req, res) => {
+    // 1. Optional Secret Verification (matches SFX 360 "Authorization Present" if secret is configured)
+    const configuredSecret = process.env.SHADOWFAX_WEBHOOK_SECRET;
+    if (configuredSecret) {
+      const incomingSecret =
+        req.get("x-shadowfax-secret") ||
+        req.get("authorization")?.replace(/^(Bearer|Token)\s+/i, "")?.trim() ||
+        req.query.secret;
+      if (incomingSecret !== configuredSecret) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+    }
+
+    const updates = normalizeShadowfaxWebhookPayload(req.body);
+    if (updates.length === 0) {
+      return res.status(200).json({ ok: true, matched: 0, updated: 0, hint: "No valid AWB found in payload" });
+    }
+
+    let matched = 0;
+    let updated = 0;
+
+    for (const item of updates) {
+      const label = await Label.findOne({
+        courier_name: "Shadowfax",
+        tracking_id: item.awb,
+      });
+
+      if (!label) continue;
+      matched++;
+
+      const beforeStatus = label.status;
+      const result = await refreshOneLabel(label, { force: true });
+      if (result.updatedStatus && result.updatedStatus !== beforeStatus) {
+        updated++;
+      }
+    }
+
+    res.json({
+      ok: true,
+      received: updates.length,
+      matched,
+      updated,
+    });
   }),
 );
 
@@ -618,11 +729,17 @@ app.use((error, _req, res, _next) => {
 });
 
 async function refreshAllLabels(filter = {}) {
+  const settings = getTrackingSettings();
+  if (!settings.externalTrackingEnabled) {
+    return { total: 0, processed: 0, skipped: 0, failed: 0, updated: 0, reason: "External tracking disabled" };
+  }
+
+  const maxBatch = settings.maxBatchSize || 10;
   const query = {
     status: { $nin: ["Delivered", "RTO"] },
     ...filter,
   };
-  const labels = await Label.find(query);
+  const labels = await Label.find(query).sort({ last_sync_attempt: 1, created_at: -1 }).limit(maxBatch);
   let processed = 0;
   let skipped = 0;
   let failed = 0;
@@ -636,7 +753,11 @@ async function refreshAllLabels(filter = {}) {
     processed++;
     try {
       const before = label.status;
-      const result = await refreshOneLabel(label);
+      const result = await refreshOneLabel(label, { source: "batch" });
+      if (result.skipped) {
+        skipped++;
+        continue;
+      }
       if (result.error) failed++;
       if (result.updatedStatus && result.updatedStatus !== before) updated++;
     } catch (error) {
@@ -651,7 +772,7 @@ async function refreshAllLabels(filter = {}) {
     await new Promise((resolve) => setTimeout(resolve, pacingDelayMs));
   }
 
-  return { total: labels.length, processed, skipped, failed, updated };
+  return { total: labels.length, processed, skipped, failed, updated, batchLimit: maxBatch };
 }
 
 

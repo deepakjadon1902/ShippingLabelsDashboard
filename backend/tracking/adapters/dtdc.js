@@ -1,5 +1,6 @@
 import { createTrackingResult, mapStatus } from "./base.js";
 import { fetchTrackCourier, hasTrackCourierKey } from "./trackcourier.js";
+import { isCircuitBreakerTripped } from "../controller.js";
 
 const COURIER_NAME = "DTDC";
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -47,7 +48,12 @@ async function fetchDtdcDirect(waybill) {
       "https://blktracksvc.dtdc.com/dtdc-api/rest/JSONCnTrk/getTrackDetails",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "api-key": token },
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": token,
+          "X-Access-Token": token,
+          "X-API-KEY": token,
+        },
         body: JSON.stringify({ trkType: "cnno", strcnno: waybill, addtnlDtl: "Y" }),
         signal: controller.signal,
       },
@@ -57,20 +63,23 @@ async function fetchDtdcDirect(waybill) {
     if (response.status === 401) {
       return {
         ok: false,
+        statusCode: 401,
+        isAuthError: true,
         error: "DTDC Direct API Authentication Failed (HTTP 401: Token invalid or expired)",
       };
     }
     if (response.status === 404) {
-      return { ok: false, error: "Shipment not found in DTDC system" };
+      return { ok: false, statusCode: 404, error: "Shipment not found in DTDC system" };
     }
     if (response.status >= 500) {
       return {
         ok: false,
+        statusCode: response.status,
         error: `DTDC Direct API Server Error (HTTP ${response.status})`,
       };
     }
     if (!response.ok) {
-      return { ok: false, error: `DTDC HTTP ${response.status}` };
+      return { ok: false, statusCode: response.status, error: `DTDC HTTP ${response.status}` };
     }
 
     const data = await response.json().catch(() => ({}));
@@ -140,8 +149,8 @@ async function fetchDtdcDirect(waybill) {
 
 /**
  * DTDC Tracking Adapter
- * 1. Primary: Direct DTDC API
- * 2. Fallback: TrackCourier.io (polled at most once every 24 hours per shipment unless forced)
+ * 1. Primary: Direct DTDC API (Direct first choice where supported)
+ * 2. Fallback: Multi-tier TrackCourier (Account 1 -> Account 2 -> Account 3)
  *
  * @param {string} trackingNumber - DTDC Waybill / Consignment Number
  * @param {Object} options - Options including { lastTrackcourierSync, force }
@@ -164,46 +173,24 @@ export async function trackDTDC(trackingNumber, options = {}) {
     return direct.result;
   }
 
-  // 2. TrackCourier.io Fallback (Secondary)
-  if (hasTrackCourierKey()) {
-    const { lastTrackcourierSync, force = false } = options;
-    const now = Date.now();
-
-    // Enforce 24-hour rate limit gate for TrackCourier.io calls unless manual force refresh
-    if (!force && lastTrackcourierSync) {
-      const lastSyncTime = new Date(lastTrackcourierSync).getTime();
-      if (!isNaN(lastSyncTime) && now - lastSyncTime < ONE_DAY_MS) {
-        // Less than 24h since last TrackCourier query. Skip calling TrackCourier.
-        return createTrackingResult({
-          courier: COURIER_NAME,
-          trackingNumber: waybill,
-          source: "none",
-          provider: "DTDC Direct",
-          error: `DTDC direct: ${direct.error || "unavailable"} | TrackCourier skipped (polled within 24h)`,
-        });
+  // 2. TrackCourier Multi-Account Fallback (Secondary: Account 1 -> Account 2 -> Account 3)
+  for (const account of [1, 2, 3]) {
+    const breakerKey = `trackcourier_account${account}`;
+    if (hasTrackCourierKey(account) && !isCircuitBreakerTripped(breakerKey)) {
+      const fallback = await fetchTrackCourier(COURIER_NAME, waybill, { account });
+      const isSuccess = fallback && !fallback.error && (fallback.status || fallback.rawStatus);
+      if (isSuccess) {
+        return {
+          ...fallback,
+          provider: `TrackCourier.io (Account ${account})`,
+          source: `trackcourier_account${account}`,
+          error: null, // Clear direct error on successful backup so UI treats tracking as fully successful
+        };
       }
     }
-
-    const fallback = await fetchTrackCourier(COURIER_NAME, waybill);
-    if (fallback.status || fallback.rawStatus) {
-      return {
-        ...fallback,
-        provider: "TrackCourier.io",
-      };
-    }
-
-    return createTrackingResult({
-      courier: COURIER_NAME,
-      trackingNumber: waybill,
-      source: fallback.source || "none",
-      provider: fallback.provider || "TrackCourier.io",
-      error: `DTDC direct: ${direct.error || "no status"} | TrackCourier: ${
-        fallback.error || "no status"
-      }`,
-    });
   }
 
-  // If TrackCourier key is not configured, report direct error and missing fallback key
+  // 3. Fallback exhausted or unconfigured
   return (
     direct.result ||
     createTrackingResult({
@@ -212,8 +199,10 @@ export async function trackDTDC(trackingNumber, options = {}) {
       source: "direct",
       provider: "DTDC Direct",
       error: direct.error
-        ? `${direct.error} (TrackCourier fallback not configured: missing TRACKCOURIER_API_KEY)`
+        ? `${direct.error} (TrackCourier fallback exhausted or unavailable)`
         : "DTDC direct tracking failed",
+      statusCode: direct.statusCode || 500,
+      isAuthError: direct.isAuthError || false,
     })
   );
 }

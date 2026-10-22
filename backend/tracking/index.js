@@ -21,7 +21,32 @@ import {
   TRACKCOURIER_SLUGS,
 } from "./adapters/trackcourier.js";
 import { trackEkart } from "./adapters/ekart.js";
-import { trackShadowfax, hasShadowfaxToken } from "./adapters/shadowfax.js";
+import {
+  trackShadowfax,
+  hasShadowfaxToken,
+  isShadowfaxDirectConfigured,
+  normalizeShadowfaxWebhookPayload,
+} from "./adapters/shadowfax.js";
+import {
+  executeTrackRequest,
+  getTrackingSettings,
+  updateTrackingSettings,
+  getTrackingUsageStats,
+  resetCircuitBreaker,
+  tripCircuitBreaker,
+  isCircuitBreakerTripped,
+} from "./controller.js";
+
+export {
+  normalizeShadowfaxWebhookPayload,
+  executeTrackRequest,
+  getTrackingSettings,
+  updateTrackingSettings,
+  getTrackingUsageStats,
+  resetCircuitBreaker,
+  tripCircuitBreaker,
+  isCircuitBreakerTripped,
+};
 
 export const AUTO_TRACK_COURIERS = new Set([
   "Delhivery",
@@ -39,8 +64,11 @@ export function getTrackingCredentialsStatus() {
   return {
     delhivery: hasDelhiveryToken(),
     dtdc: hasDtdcToken(),
-    trackcourier: hasTrackCourierKey(),
-    shadowfax: hasShadowfaxToken(),
+    trackcourier: hasTrackCourierKey(1),
+    trackcourier_account1: hasTrackCourierKey(1),
+    trackcourier_account2: hasTrackCourierKey(2),
+    trackcourier_account3: hasTrackCourierKey(3),
+    shadowfax: isShadowfaxDirectConfigured(),
   };
 }
 
@@ -49,15 +77,18 @@ export function isCourierAutoTrackable(courierName) {
 }
 
 /**
- * Routes tracking requests to the appropriate courier adapter
+ * Routes tracking requests to the appropriate courier adapter through the central controller.
+ * Implements a controlled 3-tier cascade across TrackCourier accounts (Account 1 -> Account 2 -> Account 3).
  *
  * @param {string} courierName - Name of the courier service
  * @param {string} trackingNumber - Waybill or AWB number
- * @param {Object} options - Additional options e.g. { lastTrackcourierSync, force }
+ * @param {Object} options - Additional options e.g. { lastTrackcourierSync, force, source }
  */
 export async function trackShipment(courierName, trackingNumber, options = {}) {
   const courier = String(courierName || "").trim();
   const waybill = String(trackingNumber || "").trim();
+  const source = options.source || "manual";
+  const force = !!options.force;
 
   if (!waybill) {
     return createTrackingResult({
@@ -68,40 +99,198 @@ export async function trackShipment(courierName, trackingNumber, options = {}) {
     });
   }
 
+  // 1. Primary Tracking Provider Execution
+  let primaryResult = null;
+
   if (courier === "DTDC") {
-    return trackDTDC(waybill, options);
+    primaryResult = await executeTrackRequest({
+      provider: "DTDC",
+      courier,
+      awb: waybill,
+      source,
+      force,
+      cooldownMs: options.cooldownMs,
+      executeFn: () => trackDTDC(waybill, options),
+    });
+  } else if (courier === "Shree Maruti Courier") {
+    primaryResult = await executeTrackRequest({
+      provider: "Shree Maruti Courier",
+      courier,
+      awb: waybill,
+      source,
+      force,
+      cooldownMs: options.cooldownMs,
+      executeFn: () => trackShreeMaruti(waybill, options),
+    });
+  } else if (courier === "Delhivery") {
+    primaryResult = await executeTrackRequest({
+      provider: "Delhivery",
+      courier,
+      awb: waybill,
+      source,
+      force,
+      cooldownMs: options.cooldownMs,
+      executeFn: () => trackDelhivery(waybill),
+    });
+  } else if (courier === "Ekart" || courier === "Ekart Logistics") {
+    primaryResult = await executeTrackRequest({
+      provider: "Ekart",
+      courier,
+      awb: waybill,
+      source,
+      force,
+      cooldownMs: options.cooldownMs,
+      executeFn: () => trackEkart(waybill),
+    });
+  } else if (courier === "Shadowfax") {
+    const providerName = isShadowfaxDirectConfigured() ? "Shadowfax" : (hasTrackCourierKey() ? "TrackCourier" : "Shadowfax");
+    primaryResult = await executeTrackRequest({
+      provider: providerName,
+      courier,
+      awb: waybill,
+      source,
+      force,
+      cooldownMs: options.cooldownMs,
+      executeFn: () => trackShadowfax(waybill, options),
+    });
+  } else if (courier === "India Post" || courier === "IndiaPost" || TRACKCOURIER_SLUGS[courier]) {
+    // 1. Primary: TrackCourier Account 1
+    let resAccount1 = null;
+    if (hasTrackCourierKey(1) && !isCircuitBreakerTripped("trackcourier_account1")) {
+      resAccount1 = await executeTrackRequest({
+        provider: "TrackCourier (Account 1)",
+        courier,
+        awb: waybill,
+        source,
+        force,
+        cooldownMs: options.cooldownMs,
+        executeFn: () => fetchTrackCourier(courier, waybill, { account: 1 }),
+      });
+    } else {
+      resAccount1 = {
+        skipped: true,
+        isCircuitBreakerActive: isCircuitBreakerTripped("trackcourier_account1"),
+        reason: isCircuitBreakerTripped("trackcourier_account1")
+          ? "TrackCourier Account 1 circuit breaker active (HTTP 402 quota exhausted)"
+          : "TrackCourier Account 1 key not configured",
+        provider: "TrackCourier (Account 1)",
+        courier,
+        trackingNumber: waybill,
+      };
+    }
+
+    const isAccount1Success =
+      resAccount1 &&
+      !resAccount1.error &&
+      !resAccount1.skipped &&
+      (resAccount1.status || resAccount1.rawStatus);
+
+    if (isAccount1Success) {
+      primaryResult = resAccount1;
+    } else if (resAccount1?.cooldownActive || resAccount1?.reason?.includes("globally disabled")) {
+      primaryResult = resAccount1;
+    } else if (hasTrackCourierKey(2) && !isCircuitBreakerTripped("trackcourier_account2")) {
+      // 2. Secondary: TrackCourier Account 2 (attempted when Account 1 fails/tripped/exhausted)
+      const resAccount2 = await executeTrackRequest({
+        provider: "TrackCourier (Account 2)",
+        courier,
+        awb: waybill,
+        source: "fallback",
+        force,
+        cooldownMs: options.cooldownMs,
+        executeFn: () => fetchTrackCourier(courier, waybill, { account: 2 }),
+      });
+
+      const isAccount2Success =
+        resAccount2 &&
+        !resAccount2.error &&
+        !resAccount2.skipped &&
+        (resAccount2.status || resAccount2.rawStatus);
+
+      if (isAccount2Success) {
+        primaryResult = {
+          ...resAccount2,
+          error: null, // Clear error from Account 1 so UI notifications do not show false quota warning
+        };
+      } else if (resAccount2?.cooldownActive || resAccount2?.reason?.includes("globally disabled")) {
+        primaryResult = resAccount2;
+      } else if (hasTrackCourierKey(3) && !isCircuitBreakerTripped("trackcourier_account3")) {
+        // 3. Tertiary: TrackCourier Account 3 (attempted when Accounts 1 & 2 fail/tripped/exhausted)
+        const resAccount3 = await executeTrackRequest({
+          provider: "TrackCourier (Account 3)",
+          courier,
+          awb: waybill,
+          source: "fallback",
+          force,
+          cooldownMs: options.cooldownMs,
+          executeFn: () => fetchTrackCourier(courier, waybill, { account: 3 }),
+        });
+
+        const isAccount3Success =
+          resAccount3 &&
+          !resAccount3.error &&
+          !resAccount3.skipped &&
+          (resAccount3.status || resAccount3.rawStatus);
+
+        if (isAccount3Success) {
+          primaryResult = {
+            ...resAccount3,
+            error: null, // Clear errors from Accounts 1 & 2
+          };
+        } else {
+          primaryResult = {
+            ...resAccount1,
+            error: `All TrackCourier accounts failed or quota exhausted. Account 1: ${resAccount1?.error || resAccount1?.reason || "Unavailable"}. Account 2: ${resAccount2?.error || resAccount2?.reason || "Unavailable"}. Account 3: ${resAccount3?.error || resAccount3?.reason || "Unavailable"}`,
+          };
+        }
+      } else {
+        primaryResult = {
+          ...resAccount1,
+          error: `TrackCourier Account 1 failed (${resAccount1?.error || resAccount1?.reason || "HTTP 402"}) and Account 2 failed (${resAccount2?.error || resAccount2?.reason || "Unavailable"})`,
+        };
+      }
+    } else if (hasTrackCourierKey(3) && !isCircuitBreakerTripped("trackcourier_account3")) {
+      // Direct failover to Account 3 if Account 2 is not configured or tripped
+      const resAccount3 = await executeTrackRequest({
+        provider: "TrackCourier (Account 3)",
+        courier,
+        awb: waybill,
+        source: "fallback",
+        force,
+        cooldownMs: options.cooldownMs,
+        executeFn: () => fetchTrackCourier(courier, waybill, { account: 3 }),
+      });
+
+      const isAccount3Success =
+        resAccount3 &&
+        !resAccount3.error &&
+        !resAccount3.skipped &&
+        (resAccount3.status || resAccount3.rawStatus);
+
+      if (isAccount3Success) {
+        primaryResult = {
+          ...resAccount3,
+          error: null, // Clear error from Account 1
+        };
+      } else {
+        primaryResult = {
+          ...resAccount1,
+          error: `TrackCourier Account 1 failed (${resAccount1?.error || resAccount1?.reason || "HTTP 402"}) and Account 3 failed (${resAccount3?.error || resAccount3?.reason || "Unavailable"})`,
+        };
+      }
+    } else {
+      primaryResult = resAccount1;
+    }
+  } else {
+    primaryResult = createTrackingResult({
+      courier,
+      trackingNumber: waybill,
+      source: "none",
+      error: `No tracking API available for ${courier}`,
+    });
   }
 
-  if (courier === "Shree Maruti Courier") {
-    return trackShreeMaruti(waybill, options);
-  }
-
-  if (courier === "Delhivery") {
-    return trackDelhivery(waybill);
-  }
-
-  if (courier === "Ekart" || courier === "Ekart Logistics") {
-    return trackEkart(waybill);
-  }
-
-  if (courier === "Shadowfax") {
-    return trackShadowfax(waybill, options);
-  }
-
-  if (courier === "India Post" || courier === "IndiaPost") {
-    return fetchTrackCourier("India Post", waybill);
-  }
-
-  if (TRACKCOURIER_SLUGS[courier]) {
-    return fetchTrackCourier(courier, waybill);
-  }
-
-  return createTrackingResult({
-    courier,
-    trackingNumber: waybill,
-    source: "none",
-    error: `No tracking API available for ${courier}`,
-  });
+  return primaryResult;
 }
 
 /**
@@ -114,7 +303,7 @@ export function applyTrackingResultToLabel(label, trackingResult) {
   label.last_tracking_update = now;
 
   // Track when TrackCourier fallback was actually queried
-  if (trackingResult.source === "trackcourier") {
+  if (trackingResult.source === "trackcourier" || trackingResult.source?.startsWith("trackcourier_account")) {
     label.last_trackcourier_sync = now;
   }
 
@@ -161,8 +350,12 @@ export function applyTrackingResultToLabel(label, trackingResult) {
     label.tracking_provider = trackingResult.provider;
   } else if (trackingResult.source === "direct") {
     label.tracking_provider = `${label.courier_name} Direct`;
-  } else if (trackingResult.source === "trackcourier") {
-    label.tracking_provider = "TrackCourier.io";
+  } else if (trackingResult.source === "trackcourier_account3") {
+    label.tracking_provider = "TrackCourier.io (Account 3)";
+  } else if (trackingResult.source === "trackcourier_account2") {
+    label.tracking_provider = "TrackCourier.io (Account 2)";
+  } else if (trackingResult.source === "trackcourier" || trackingResult.source === "trackcourier_account1") {
+    label.tracking_provider = "TrackCourier.io (Account 1)";
   }
 
   // De-duplicate and merge checkpoints
@@ -328,7 +521,20 @@ export async function refreshOneLabel(label, options = {}) {
     lastMarutiSync: label.last_maruti_sync,
     force: options.force || false,
     cooldownMs: options.cooldownMs,
+    source: options.source || "manual",
+    allowFallback: options.allowFallback || false,
   });
+
+  if (trackingResult.skipped) {
+    return {
+      skipped: true,
+      reason: trackingResult.reason,
+      status: label.status,
+      cooldownActive: !!trackingResult.cooldownActive,
+      remainingSeconds: trackingResult.remainingSeconds || 0,
+      isCircuitBreakerActive: !!trackingResult.isCircuitBreakerActive,
+    };
+  }
 
   const { statusChanged, newStatus } = applyTrackingResultToLabel(label, trackingResult);
 

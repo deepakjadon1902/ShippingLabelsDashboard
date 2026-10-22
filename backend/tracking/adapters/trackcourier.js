@@ -13,8 +13,61 @@ export const TRACKCOURIER_SLUGS = {
   "India Post": "indiapost",
 };
 
-export function hasTrackCourierKey() {
+/**
+ * Resolves the secondary TrackCourier API key checking multiple standard variable names
+ */
+export function getTrackCourierBackupKey() {
+  return (
+    process.env.TRACKCOURIER_BACKUP_API_KEY ||
+    process.env.TRACKCOURIER_SECONDARY_API_KEY ||
+    process.env.TRACKCOURIER_ACCOUNT2_API_KEY ||
+    process.env.TRACKCOURIER_KEY_2 ||
+    process.env.TRACKCOURIER_API_KEY_2 ||
+    null
+  );
+}
+
+/**
+ * Resolves the tertiary TrackCourier API key checking multiple standard variable names
+ */
+export function getTrackCourierTertiaryKey() {
+  return (
+    process.env.TRACKCOURIER_TERTIARY_API_KEY ||
+    process.env.TRACKCOURIER_ACCOUNT3_API_KEY ||
+    process.env.TRACKCOURIER_KEY_3 ||
+    process.env.TRACKCOURIER_API_KEY_3 ||
+    process.env.TRACKCOURIER_THIRD_API_KEY ||
+    null
+  );
+}
+
+/**
+ * Checks whether TrackCourier API key is configured
+ * @param {number|string} account - 1 for primary, 2 for secondary, 3 for tertiary
+ */
+export function hasTrackCourierKey(account = 1) {
+  const acc = Number(account);
+  if (acc === 3) {
+    return !!getTrackCourierTertiaryKey();
+  }
+  if (acc === 2) {
+    return !!getTrackCourierBackupKey();
+  }
   return !!process.env.TRACKCOURIER_API_KEY;
+}
+
+/**
+ * Checks whether backup TrackCourier Account 2 key is configured
+ */
+export function hasTrackCourierBackupKey() {
+  return !!getTrackCourierBackupKey();
+}
+
+/**
+ * Checks whether tertiary TrackCourier Account 3 key is configured
+ */
+export function hasTrackCourierTertiaryKey() {
+  return !!getTrackCourierTertiaryKey();
 }
 
 export function getTrackCourierSlug(courierName) {
@@ -69,21 +122,39 @@ function normalizeTrackCourierStatus(rawStatus, mostRecentStatus) {
 }
 
 /**
- * Fetches tracking information from TrackCourier.io
+ * Fetches tracking information from TrackCourier.io across Account 1, 2, or 3
  * Endpoint: GET https://api.trackcourier.io/v1/track?courier={slug}&tracking_number={waybill}
- * Header: X-API-Key: {TRACKCOURIER_API_KEY}
+ * Header: X-API-Key: {TRACKCOURIER_API_KEY} | {TRACKCOURIER_BACKUP_API_KEY} | {TRACKCOURIER_TERTIARY_API_KEY}
+ *
+ * @param {string} courierName - Name of courier service
+ * @param {string} waybill - Tracking/AWB number
+ * @param {Object} options - Options e.g. { account: 1 | 2 | 3 }
  */
-export async function fetchTrackCourier(courierName, waybill) {
-  const key = process.env.TRACKCOURIER_API_KEY;
+export async function fetchTrackCourier(courierName, waybill, options = {}) {
+  const account = Number(options?.account) === 3 ? 3 : Number(options?.account) === 2 ? 2 : 1;
+  const key =
+    account === 3
+      ? getTrackCourierTertiaryKey()
+      : account === 2
+        ? getTrackCourierBackupKey()
+        : process.env.TRACKCOURIER_API_KEY;
+
+  const source = `trackcourier_account${account}`;
+  const provider = `TrackCourier.io (Account ${account})`;
   const slug = getTrackCourierSlug(courierName) || String(courierName || "").toLowerCase().replace(/\s+/g, "");
 
   if (!key) {
     return createTrackingResult({
       courier: courierName,
       trackingNumber: waybill,
-      source: "trackcourier",
-      provider: "TrackCourier.io",
-      error: "Missing TRACKCOURIER_API_KEY in environment",
+      source,
+      provider,
+      error:
+        account === 3
+          ? "Missing TRACKCOURIER_TERTIARY_API_KEY in environment"
+          : account === 2
+            ? "Missing TRACKCOURIER_BACKUP_API_KEY in environment"
+            : "Missing TRACKCOURIER_API_KEY in environment",
     });
   }
 
@@ -91,8 +162,8 @@ export async function fetchTrackCourier(courierName, waybill) {
     return createTrackingResult({
       courier: courierName,
       trackingNumber: waybill,
-      source: "trackcourier",
-      provider: "TrackCourier.io",
+      source,
+      provider,
       error: "Tracking number is required",
     });
   }
@@ -119,9 +190,11 @@ export async function fetchTrackCourier(courierName, waybill) {
       return createTrackingResult({
         courier: courierName,
         trackingNumber: waybill,
-        source: "trackcourier",
-        provider: "TrackCourier.io",
-        error: "TrackCourier.io authentication failed (HTTP 401: Invalid API key)",
+        source,
+        provider,
+        error: `${provider} authentication failed (HTTP 401: Invalid API key)`,
+        statusCode: 401,
+        isAuthError: true,
       });
     }
 
@@ -129,9 +202,23 @@ export async function fetchTrackCourier(courierName, waybill) {
       return createTrackingResult({
         courier: courierName,
         trackingNumber: waybill,
-        source: "trackcourier",
-        provider: "TrackCourier.io",
-        error: "TrackCourier.io quota exceeded (HTTP 402)",
+        source,
+        provider,
+        error: `${provider} quota exceeded (HTTP 402)`,
+        statusCode: 402,
+        isQuotaError: true,
+      });
+    }
+
+    if (response.status === 429) {
+      return createTrackingResult({
+        courier: courierName,
+        trackingNumber: waybill,
+        source,
+        provider,
+        error: `${provider} rate limit reached (HTTP 429)`,
+        statusCode: 429,
+        isRateLimitError: true,
       });
     }
 
@@ -141,12 +228,12 @@ export async function fetchTrackCourier(courierName, waybill) {
         errPayload.error?.message ||
         errPayload.message ||
         errPayload.detail ||
-        `Shipment not found on TrackCourier.io (courier: ${slug})`;
+        `Shipment not found on ${provider} (courier: ${slug})`;
       return createTrackingResult({
         courier: courierName,
         trackingNumber: waybill,
-        source: "trackcourier",
-        provider: "TrackCourier.io",
+        source,
+        provider,
         error: errMsg,
       });
     }
@@ -157,12 +244,12 @@ export async function fetchTrackCourier(courierName, waybill) {
         errPayload.error?.message ||
         errPayload.message ||
         errPayload.detail ||
-        `TrackCourier.io HTTP ${response.status}`;
+        `${provider} HTTP ${response.status}`;
       return createTrackingResult({
         courier: courierName,
         trackingNumber: waybill,
-        source: "trackcourier",
-        provider: "TrackCourier.io",
+        source,
+        provider,
         error: errMsg,
       });
     }
@@ -172,9 +259,9 @@ export async function fetchTrackCourier(courierName, waybill) {
       return createTrackingResult({
         courier: courierName,
         trackingNumber: waybill,
-        source: "trackcourier",
-        provider: "TrackCourier.io",
-        error: payload.detail || payload.message || payload.error?.message || "No tracking data returned by TrackCourier.io",
+        source,
+        provider,
+        error: payload.detail || payload.message || payload.error?.message || `No tracking data returned by ${provider}`,
       });
     }
 
@@ -207,7 +294,7 @@ export async function fetchTrackCourier(courierName, waybill) {
       if (!isNaN(parsed.getTime())) deliveredAt = parsed.toISOString();
     }
 
-    // Parse checkpoints (TrackCourier returns data.Checkpoints or data.checkpoints)
+    // Parse checkpoints
     const rawCheckpoints = Array.isArray(data.Checkpoints)
       ? data.Checkpoints
       : Array.isArray(data.checkpoints)
@@ -233,7 +320,7 @@ export async function fetchTrackCourier(courierName, waybill) {
           description: String(description).trim(),
           location: location ? String(location).trim() : null,
           status: status ? String(status).trim() : null,
-          source: "trackcourier",
+          source,
         };
       })
       .sort((a, b) => (new Date(b.date || 0) > new Date(a.date || 0) ? 1 : -1));
@@ -248,7 +335,7 @@ export async function fetchTrackCourier(courierName, waybill) {
       courier: courierName,
       trackingNumber: waybill,
       status: internalStatus,
-      rawStatus: rawStatus ? `[trackcourier] ${rawStatus}` : null,
+      rawStatus: rawStatus ? `[${source}] ${rawStatus}` : null,
       location,
       eventDate,
       eventDescription,
@@ -257,8 +344,8 @@ export async function fetchTrackCourier(courierName, waybill) {
       destination,
       pickupAt,
       deliveredAt,
-      source: "trackcourier",
-      provider: "TrackCourier.io",
+      source,
+      provider,
       error: internalStatus ? null : (rawStatus ? null : "No status update available yet"),
       history,
     });
@@ -267,16 +354,16 @@ export async function fetchTrackCourier(courierName, waybill) {
       return createTrackingResult({
         courier: courierName,
         trackingNumber: waybill,
-        source: "trackcourier",
-        provider: "TrackCourier.io",
-        error: "TrackCourier.io request timed out",
+        source,
+        provider,
+        error: `${provider} request timed out`,
       });
     }
     return createTrackingResult({
       courier: courierName,
       trackingNumber: waybill,
-      source: "trackcourier",
-      provider: "TrackCourier.io",
+      source,
+      provider,
       error: error.message,
     });
   }

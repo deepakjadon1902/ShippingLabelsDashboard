@@ -2,7 +2,7 @@
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import { Label } from "../models/Label.js";
-import { refreshOneLabel } from "../tracking/index.js";
+import { refreshOneLabel, getTrackingSettings } from "../tracking/index.js";
 
 import path from "path";
 import { fileURLToPath } from "url";
@@ -50,6 +50,28 @@ async function runSync() {
     process.exit(1);
   }
 
+  const settings = getTrackingSettings();
+  const isForced = process.argv.includes("--force");
+
+  if (!isForced && !settings.scheduledSyncEnabled) {
+    console.log(
+      "ℹ️ Scheduled sync is disabled by administrator policy (scheduledSyncEnabled = false).",
+    );
+    console.log(
+      "   To run manually, pass --force (e.g. node scripts/sync-tracking.js --force). Exiting safely.\n",
+    );
+    await mongoose.disconnect();
+    process.exit(0);
+  }
+
+  if (!isForced && !settings.externalTrackingEnabled) {
+    console.log(
+      "ℹ️ External tracking is globally disabled by administrator configuration. Exiting safely.\n",
+    );
+    await mongoose.disconnect();
+    process.exit(0);
+  }
+
   const query = {
     tracking_id: { $exists: true, $ne: null, $nin: ["", "-"] },
     status: { $nin: ["Delivered", "RTO"] },
@@ -71,8 +93,17 @@ async function runSync() {
   };
 
   try {
-    const labels = await Label.find(query).sort({ created_at: -1 });
-    console.log(`📋 Found ${labels.length} active shipment(s) to synchronize.\n`);
+    const maxBatch = SYNC_ALL_COURIERS ? null : settings.maxBatchSize || 10;
+    const labelsQuery = Label.find(query).sort({ last_sync_attempt: 1, created_at: -1 });
+    if (maxBatch) {
+      labelsQuery.limit(maxBatch);
+    }
+    const labels = await labelsQuery;
+    console.log(
+      `📋 Found ${labels.length} active shipment(s) to synchronize${
+        maxBatch ? ` (batch limit: ${maxBatch})` : ""
+      }.\n`,
+    );
 
     for (let i = 0; i < labels.length; i++) {
       const label = labels[i];
@@ -81,7 +112,7 @@ async function runSync() {
 
       try {
         const initialStatus = label.status;
-        const result = await refreshOneLabel(label);
+        const result = await refreshOneLabel(label, { source: "cron", force: isForced });
 
         if (result.skipped) {
           stats.skipped++;

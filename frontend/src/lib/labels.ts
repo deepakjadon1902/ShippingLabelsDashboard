@@ -390,8 +390,95 @@ export async function getTrackingCredsStatus(): Promise<{
   delhivery: boolean;
   dtdc: boolean;
   trackcourier: boolean;
+  trackcourier_account1?: boolean;
+  trackcourier_account2?: boolean;
+  trackcourier_account3?: boolean;
+  shadowfax?: boolean;
 }> {
   return api("/tracking/credentials");
+}
+
+export interface ProviderControl {
+  enabled: boolean;
+  dailyBudget: number;
+  monthlyBudget: number;
+  usedToday: number;
+  usedThisMonth: number;
+  remainingDaily: number;
+  remainingMonthly: number;
+  isCircuitBreakerTripped: boolean;
+  circuitBreakerReason: string | null;
+  circuitBreakerTrippedAt: string | null;
+  lastSuccess: string | null;
+  lastError: string | null;
+  lastErrorTime: string | null;
+}
+
+export interface TrackingUsageStats {
+  settings: {
+    externalTrackingEnabled: boolean;
+    autoRefreshEnabled: boolean;
+    scheduledSyncEnabled: boolean;
+        perShipmentCooldownMinutes: number;
+    maxBatchSize: number;
+    globalDailyBudget: number;
+    globalMonthlyBudget: number;
+    providers: Record<
+      string,
+      { enabled: boolean; dailyBudget: number; monthlyBudget: number }
+    >;
+  };
+  global: {
+    externalTrackingEnabled: boolean;
+    autoRefreshEnabled: boolean;
+    scheduledSyncEnabled: boolean;
+        perShipmentCooldownMinutes: number;
+    maxBatchSize: number;
+    usedToday: number;
+    usedThisMonth: number;
+    dailyBudget: number;
+    monthlyBudget: number;
+    remainingDaily: number;
+    remainingMonthly: number;
+  };
+  providers: Record<string, ProviderControl>;
+}
+
+export async function getTrackingControls(): Promise<TrackingUsageStats> {
+  return api("/tracking/admin/controls");
+}
+
+export async function updateTrackingControls(
+  updates: Partial<TrackingUsageStats["settings"]>,
+): Promise<TrackingUsageStats> {
+  return api("/tracking/admin/controls", {
+    method: "POST",
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function resetTrackingCircuitBreaker(provider: string): Promise<any> {
+  return api("/tracking/admin/reset-circuit-breaker", {
+    method: "POST",
+    body: JSON.stringify({ provider }),
+  });
+}
+
+export interface TrackingLedgerItem {
+  id: string;
+  timestamp: string;
+  provider: string;
+  courier_name: string;
+  awb: string;
+  source: string;
+  status_code: number | null;
+  success: boolean;
+  error_message: string | null;
+  duration_ms: number;
+}
+
+export async function getTrackingLedger(limit = 20): Promise<TrackingLedgerItem[]> {
+  return api(`/tracking/admin/ledger?limit=${limit}`);
 }
 
 export async function refreshLabelTracking(id: string): Promise<{

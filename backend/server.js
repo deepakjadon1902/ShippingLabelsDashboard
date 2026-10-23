@@ -672,16 +672,22 @@ app.post(
 app.post(
   "/api/webhooks/shadowfax",
   asyncHandler(async (req, res) => {
-    // 1. Optional Secret Verification (matches SFX 360 "Authorization Present" if secret is configured)
+    // 1. Secret Verification — Fail closed when secret is not configured in production
     const configuredSecret = process.env.SHADOWFAX_WEBHOOK_SECRET;
-    if (configuredSecret) {
-      const incomingSecret =
-        req.get("x-shadowfax-secret") ||
-        req.get("authorization")?.replace(/^(Bearer|Token)\s+/i, "")?.trim() ||
-        req.query.secret;
-      if (incomingSecret !== configuredSecret) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+    if (!configuredSecret) {
+      return res.status(503).json({
+        ok: false,
+        error: "Webhook endpoint not configured: SHADOWFAX_WEBHOOK_SECRET is missing",
+      });
+    }
+
+    const incomingSecret =
+      req.get("x-shadowfax-secret") ||
+      req.get("authorization")?.replace(/^(Bearer|Token)\s+/i, "")?.trim() ||
+      req.query.secret;
+
+    if (!incomingSecret || !secureCompare(incomingSecret, configuredSecret)) {
+      return res.status(401).json({ ok: false, error: "Unauthorized: Invalid webhook secret" });
     }
 
     const updates = normalizeShadowfaxWebhookPayload(req.body);

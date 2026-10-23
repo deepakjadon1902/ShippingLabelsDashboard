@@ -8,7 +8,7 @@ import {
   calculateDelay,
   mergeCheckpoints,
 } from "./adapters/base.js";
-import { trackDTDC, hasDtdcToken } from "./adapters/dtdc.js";
+import { trackDTDC, fetchDtdcDirect, hasDtdcToken } from "./adapters/dtdc.js";
 import {
   trackShreeMaruti,
   getMarutiGlobalCooldown,
@@ -84,6 +84,148 @@ export function isCourierAutoTrackable(courierName) {
  * @param {string} trackingNumber - Waybill or AWB number
  * @param {Object} options - Additional options e.g. { lastTrackcourierSync, force, source }
  */
+/**
+ * Cascades through TrackCourier accounts (Account 1 -> Account 2 -> Account 3)
+ * with independent budgets, cooldowns, circuit breakers, and ledger recording.
+ */
+async function executeTrackCourierCascade(courier, waybill, options = {}) {
+  const { source = "fallback", force = false, cooldownMs } = options;
+
+  // 1. Primary: TrackCourier Account 1
+  let resAccount1 = null;
+  if (hasTrackCourierKey(1) && !isCircuitBreakerTripped("trackcourier_account1")) {
+    resAccount1 = await executeTrackRequest({
+      provider: "TrackCourier (Account 1)",
+      courier,
+      awb: waybill,
+      source,
+      force,
+      cooldownMs,
+      executeFn: () => fetchTrackCourier(courier, waybill, { account: 1 }),
+    });
+  } else {
+    resAccount1 = {
+      skipped: true,
+      isCircuitBreakerActive: isCircuitBreakerTripped("trackcourier_account1"),
+      reason: isCircuitBreakerTripped("trackcourier_account1")
+        ? "TrackCourier Account 1 circuit breaker active (HTTP 402 quota exhausted)"
+        : "TrackCourier Account 1 key not configured",
+      provider: "TrackCourier (Account 1)",
+      courier,
+      trackingNumber: waybill,
+    };
+  }
+
+  const isAccount1Success =
+    resAccount1 &&
+    !resAccount1.error &&
+    !resAccount1.skipped &&
+    (resAccount1.status || resAccount1.rawStatus);
+
+  if (isAccount1Success) {
+    return resAccount1;
+  }
+  if (resAccount1?.cooldownActive || resAccount1?.reason?.includes("globally disabled")) {
+    return resAccount1;
+  }
+
+  // 2. Secondary: TrackCourier Account 2 (attempted when Account 1 fails/tripped/exhausted)
+  if (hasTrackCourierKey(2) && !isCircuitBreakerTripped("trackcourier_account2")) {
+    const resAccount2 = await executeTrackRequest({
+      provider: "TrackCourier (Account 2)",
+      courier,
+      awb: waybill,
+      source: "fallback",
+      force,
+      cooldownMs,
+      executeFn: () => fetchTrackCourier(courier, waybill, { account: 2 }),
+    });
+
+    const isAccount2Success =
+      resAccount2 &&
+      !resAccount2.error &&
+      !resAccount2.skipped &&
+      (resAccount2.status || resAccount2.rawStatus);
+
+    if (isAccount2Success) {
+      return {
+        ...resAccount2,
+        error: null, // Clear error from Account 1 so UI notifications do not show false quota warning
+      };
+    }
+    if (resAccount2?.cooldownActive || resAccount2?.reason?.includes("globally disabled")) {
+      return resAccount2;
+    }
+
+    // 3. Tertiary: TrackCourier Account 3 (attempted when Accounts 1 & 2 fail/tripped/exhausted)
+    if (hasTrackCourierKey(3) && !isCircuitBreakerTripped("trackcourier_account3")) {
+      const resAccount3 = await executeTrackRequest({
+        provider: "TrackCourier (Account 3)",
+        courier,
+        awb: waybill,
+        source: "fallback",
+        force,
+        cooldownMs,
+        executeFn: () => fetchTrackCourier(courier, waybill, { account: 3 }),
+      });
+
+      const isAccount3Success =
+        resAccount3 &&
+        !resAccount3.error &&
+        !resAccount3.skipped &&
+        (resAccount3.status || resAccount3.rawStatus);
+
+      if (isAccount3Success) {
+        return {
+          ...resAccount3,
+          error: null, // Clear errors from Accounts 1 & 2
+        };
+      }
+      return {
+        ...resAccount1,
+        error: `All TrackCourier accounts failed or quota exhausted. Account 1: ${resAccount1?.error || resAccount1?.reason || "Unavailable"}. Account 2: ${resAccount2?.error || resAccount2?.reason || "Unavailable"}. Account 3: ${resAccount3?.error || resAccount3?.reason || "Unavailable"}`,
+      };
+    }
+
+    return {
+      ...resAccount1,
+      error: `TrackCourier Account 1 failed (${resAccount1?.error || resAccount1?.reason || "HTTP 402"}) and Account 2 failed (${resAccount2?.error || resAccount2?.reason || "Unavailable"})`,
+    };
+  }
+
+  // Direct failover to Account 3 if Account 2 is not configured or tripped
+  if (hasTrackCourierKey(3) && !isCircuitBreakerTripped("trackcourier_account3")) {
+    const resAccount3 = await executeTrackRequest({
+      provider: "TrackCourier (Account 3)",
+      courier,
+      awb: waybill,
+      source: "fallback",
+      force,
+      cooldownMs,
+      executeFn: () => fetchTrackCourier(courier, waybill, { account: 3 }),
+    });
+
+    const isAccount3Success =
+      resAccount3 &&
+      !resAccount3.error &&
+      !resAccount3.skipped &&
+      (resAccount3.status || resAccount3.rawStatus);
+
+    if (isAccount3Success) {
+      return {
+        ...resAccount3,
+        error: null, // Clear error from Account 1
+      };
+    }
+    return {
+      ...resAccount1,
+      error: `TrackCourier Account 1 failed (${resAccount1?.error || resAccount1?.reason || "HTTP 402"}) and Account 3 failed (${resAccount3?.error || resAccount3?.reason || "Unavailable"})`,
+    };
+  }
+
+  return resAccount1;
+}
+
 export async function trackShipment(courierName, trackingNumber, options = {}) {
   const courier = String(courierName || "").trim();
   const waybill = String(trackingNumber || "").trim();
@@ -103,15 +245,86 @@ export async function trackShipment(courierName, trackingNumber, options = {}) {
   let primaryResult = null;
 
   if (courier === "DTDC") {
-    primaryResult = await executeTrackRequest({
-      provider: "DTDC",
-      courier,
-      awb: waybill,
-      source,
-      force,
-      cooldownMs: options.cooldownMs,
-      executeFn: () => trackDTDC(waybill, options),
-    });
+    // 1. Direct DTDC API (Primary choice where supported)
+    let directRes = null;
+    if (hasDtdcToken() && !isCircuitBreakerTripped("dtdc")) {
+      directRes = await executeTrackRequest({
+        provider: "DTDC Direct",
+        courier: "DTDC",
+        awb: waybill,
+        source,
+        force,
+        cooldownMs: options.cooldownMs,
+        executeFn: async () => {
+          const direct = await fetchDtdcDirect(waybill);
+          if (direct.ok && direct.result && (direct.result.status || direct.result.rawStatus)) {
+            return direct.result;
+          }
+          return (
+            direct.result ||
+            createTrackingResult({
+              courier: "DTDC",
+              trackingNumber: waybill,
+              source: "direct",
+              provider: "DTDC Direct",
+              error: direct.error || "DTDC direct tracking failed",
+              statusCode: direct.statusCode || 500,
+              isAuthError: direct.isAuthError || false,
+            })
+          );
+        },
+      });
+    } else {
+      directRes = {
+        skipped: true,
+        isCircuitBreakerActive: isCircuitBreakerTripped("dtdc"),
+        reason: isCircuitBreakerTripped("dtdc")
+          ? "DTDC Direct circuit breaker active (Authentication failed HTTP 401)"
+          : "DTDC Direct API token not configured",
+        provider: "DTDC Direct",
+        courier: "DTDC",
+        trackingNumber: waybill,
+      };
+    }
+
+    const isDirectSuccess =
+      directRes &&
+      !directRes.error &&
+      !directRes.skipped &&
+      (directRes.status || directRes.rawStatus);
+
+    if (isDirectSuccess) {
+      primaryResult = directRes;
+    } else if (directRes?.cooldownActive || directRes?.reason?.includes("globally disabled")) {
+      primaryResult = directRes;
+    } else {
+      // 2. Cascade to TrackCourier multi-tier fallback (Account 1 -> Account 2 -> Account 3)
+      // Every fallback request uses centralized ledger, quota-budget, and circuit-breaker controls.
+      // A tripped DTDC direct breaker does NOT suppress eligible TrackCourier fallback.
+      const fallbackResult = await executeTrackCourierCascade("DTDC", waybill, {
+        source: "fallback",
+        force,
+        cooldownMs: options.cooldownMs,
+      });
+
+      const isFallbackSuccess =
+        fallbackResult &&
+        !fallbackResult.error &&
+        !fallbackResult.skipped &&
+        (fallbackResult.status || fallbackResult.rawStatus);
+
+      if (isFallbackSuccess) {
+        primaryResult = {
+          ...fallbackResult,
+          error: null, // Clear direct error on successful backup so UI treats tracking as fully successful
+        };
+      } else {
+        primaryResult = {
+          ...fallbackResult,
+          error: `DTDC direct tracking failed (${directRes?.error || directRes?.reason || "Failed"}) and TrackCourier fallback failed (${fallbackResult?.error || fallbackResult?.reason || "Unavailable"})`,
+        };
+      }
+    }
   } else if (courier === "Shree Maruti Courier") {
     primaryResult = await executeTrackRequest({
       provider: "Shree Maruti Courier",
@@ -154,133 +367,11 @@ export async function trackShipment(courierName, trackingNumber, options = {}) {
       executeFn: () => trackShadowfax(waybill, options),
     });
   } else if (courier === "India Post" || courier === "IndiaPost" || TRACKCOURIER_SLUGS[courier]) {
-    // 1. Primary: TrackCourier Account 1
-    let resAccount1 = null;
-    if (hasTrackCourierKey(1) && !isCircuitBreakerTripped("trackcourier_account1")) {
-      resAccount1 = await executeTrackRequest({
-        provider: "TrackCourier (Account 1)",
-        courier,
-        awb: waybill,
-        source,
-        force,
-        cooldownMs: options.cooldownMs,
-        executeFn: () => fetchTrackCourier(courier, waybill, { account: 1 }),
-      });
-    } else {
-      resAccount1 = {
-        skipped: true,
-        isCircuitBreakerActive: isCircuitBreakerTripped("trackcourier_account1"),
-        reason: isCircuitBreakerTripped("trackcourier_account1")
-          ? "TrackCourier Account 1 circuit breaker active (HTTP 402 quota exhausted)"
-          : "TrackCourier Account 1 key not configured",
-        provider: "TrackCourier (Account 1)",
-        courier,
-        trackingNumber: waybill,
-      };
-    }
-
-    const isAccount1Success =
-      resAccount1 &&
-      !resAccount1.error &&
-      !resAccount1.skipped &&
-      (resAccount1.status || resAccount1.rawStatus);
-
-    if (isAccount1Success) {
-      primaryResult = resAccount1;
-    } else if (resAccount1?.cooldownActive || resAccount1?.reason?.includes("globally disabled")) {
-      primaryResult = resAccount1;
-    } else if (hasTrackCourierKey(2) && !isCircuitBreakerTripped("trackcourier_account2")) {
-      // 2. Secondary: TrackCourier Account 2 (attempted when Account 1 fails/tripped/exhausted)
-      const resAccount2 = await executeTrackRequest({
-        provider: "TrackCourier (Account 2)",
-        courier,
-        awb: waybill,
-        source: "fallback",
-        force,
-        cooldownMs: options.cooldownMs,
-        executeFn: () => fetchTrackCourier(courier, waybill, { account: 2 }),
-      });
-
-      const isAccount2Success =
-        resAccount2 &&
-        !resAccount2.error &&
-        !resAccount2.skipped &&
-        (resAccount2.status || resAccount2.rawStatus);
-
-      if (isAccount2Success) {
-        primaryResult = {
-          ...resAccount2,
-          error: null, // Clear error from Account 1 so UI notifications do not show false quota warning
-        };
-      } else if (resAccount2?.cooldownActive || resAccount2?.reason?.includes("globally disabled")) {
-        primaryResult = resAccount2;
-      } else if (hasTrackCourierKey(3) && !isCircuitBreakerTripped("trackcourier_account3")) {
-        // 3. Tertiary: TrackCourier Account 3 (attempted when Accounts 1 & 2 fail/tripped/exhausted)
-        const resAccount3 = await executeTrackRequest({
-          provider: "TrackCourier (Account 3)",
-          courier,
-          awb: waybill,
-          source: "fallback",
-          force,
-          cooldownMs: options.cooldownMs,
-          executeFn: () => fetchTrackCourier(courier, waybill, { account: 3 }),
-        });
-
-        const isAccount3Success =
-          resAccount3 &&
-          !resAccount3.error &&
-          !resAccount3.skipped &&
-          (resAccount3.status || resAccount3.rawStatus);
-
-        if (isAccount3Success) {
-          primaryResult = {
-            ...resAccount3,
-            error: null, // Clear errors from Accounts 1 & 2
-          };
-        } else {
-          primaryResult = {
-            ...resAccount1,
-            error: `All TrackCourier accounts failed or quota exhausted. Account 1: ${resAccount1?.error || resAccount1?.reason || "Unavailable"}. Account 2: ${resAccount2?.error || resAccount2?.reason || "Unavailable"}. Account 3: ${resAccount3?.error || resAccount3?.reason || "Unavailable"}`,
-          };
-        }
-      } else {
-        primaryResult = {
-          ...resAccount1,
-          error: `TrackCourier Account 1 failed (${resAccount1?.error || resAccount1?.reason || "HTTP 402"}) and Account 2 failed (${resAccount2?.error || resAccount2?.reason || "Unavailable"})`,
-        };
-      }
-    } else if (hasTrackCourierKey(3) && !isCircuitBreakerTripped("trackcourier_account3")) {
-      // Direct failover to Account 3 if Account 2 is not configured or tripped
-      const resAccount3 = await executeTrackRequest({
-        provider: "TrackCourier (Account 3)",
-        courier,
-        awb: waybill,
-        source: "fallback",
-        force,
-        cooldownMs: options.cooldownMs,
-        executeFn: () => fetchTrackCourier(courier, waybill, { account: 3 }),
-      });
-
-      const isAccount3Success =
-        resAccount3 &&
-        !resAccount3.error &&
-        !resAccount3.skipped &&
-        (resAccount3.status || resAccount3.rawStatus);
-
-      if (isAccount3Success) {
-        primaryResult = {
-          ...resAccount3,
-          error: null, // Clear error from Account 1
-        };
-      } else {
-        primaryResult = {
-          ...resAccount1,
-          error: `TrackCourier Account 1 failed (${resAccount1?.error || resAccount1?.reason || "HTTP 402"}) and Account 3 failed (${resAccount3?.error || resAccount3?.reason || "Unavailable"})`,
-        };
-      }
-    } else {
-      primaryResult = resAccount1;
-    }
+    primaryResult = await executeTrackCourierCascade(courier, waybill, {
+      source,
+      force,
+      cooldownMs: options.cooldownMs,
+    });
   } else {
     primaryResult = createTrackingResult({
       courier,

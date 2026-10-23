@@ -138,6 +138,13 @@ function isDateInRange(
     return d.getTime() >= todayStart - 29 * 86400000;
   }
   if (range === "custom" && customStart && customEnd) {
+    const [sY, sM, sD] = customStart.split("-").map(Number);
+    const [eY, eM, eD] = customEnd.split("-").map(Number);
+    if (sY && sM && sD && eY && eM && eD) {
+      const s = new Date(sY, sM - 1, sD, 0, 0, 0, 0).getTime();
+      const e = new Date(eY, eM - 1, eD, 23, 59, 59, 999).getTime();
+      return d.getTime() >= s && d.getTime() <= e;
+    }
     const s = new Date(customStart).getTime();
     const e = new Date(customEnd).getTime() + 86400000 - 1;
     return d.getTime() >= s && d.getTime() <= e;
@@ -219,12 +226,18 @@ function Dashboard() {
     for (const l of labels) {
       const isCreatedToday = l.created_at && getLocalDateKey(l.created_at) === todayStr;
       const isDeliveredToday = l.delivered_at && getLocalDateKey(l.delivered_at) === todayStr;
+      const isOfdToday = isLabelOutOfDelivery(l);
 
       if (isCreatedToday) createdToday++;
       if (isDeliveredToday) deliveredToday++;
-      if (isLabelOutOfDelivery(l) && (isCreatedToday || isDeliveredToday)) ofdToday++;
+      // Live OFD counts all active parcels out for delivery today, including those dispatched earlier
+      if (isOfdToday) ofdToday++;
 
-      const inRange = isDateInRange(l.created_at, dateRange, customStart, customEnd);
+      // When filtering by "Today", include shipments created today, delivered today, or currently out for delivery
+      const inRange =
+        dateRange === "today"
+          ? isCreatedToday || isDeliveredToday || isOfdToday
+          : isDateInRange(l.created_at, dateRange, customStart, customEnd);
       if (!inRange) continue;
 
       total++;
@@ -281,6 +294,7 @@ function Dashboard() {
 
   // 2. Filtered Shipments for Main Table
   const filteredShipments = useMemo(() => {
+    const todayStr = getLocalDateKey(new Date());
     const s = search.trim().toLowerCase();
     return labels.filter((l) => {
       if (s) {
@@ -321,7 +335,15 @@ function Dashboard() {
         }
       }
 
-      return isDateInRange(l.created_at, dateRange, customStart, customEnd);
+      if (dateRange === "today") {
+        const isCreatedToday = l.created_at && getLocalDateKey(l.created_at) === todayStr;
+        const isDeliveredToday = l.delivered_at && getLocalDateKey(l.delivered_at) === todayStr;
+        const isOfdToday = isLabelOutOfDelivery(l);
+        if (!(isCreatedToday || isDeliveredToday || isOfdToday)) return false;
+      } else if (!isDateInRange(l.created_at, dateRange, customStart, customEnd)) {
+        return false;
+      }
+      return true;
     });
   }, [labels, search, courierFilter, statusFilter, dateRange, customStart, customEnd]);
 
@@ -627,9 +649,9 @@ function Dashboard() {
           </TabsTrigger>
           <TabsTrigger value="today" className="text-xs py-2 px-3 data-[state=active]:bg-card data-[state=active]:shadow-xs gap-1.5">
             Today's Deliveries
-            {kpis.createdToday + kpis.deliveredToday > 0 && (
+            {todayLabels.length > 0 && (
               <span className="text-[10px] font-semibold font-tabular px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-                {kpis.createdToday + kpis.deliveredToday}
+                {todayLabels.length}
               </span>
             )}
           </TabsTrigger>

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   ExternalLink,
@@ -138,6 +138,13 @@ export function ShipmentTable({
 
   const totalPages = Math.max(1, Math.ceil(labels.length / pageSize));
   const currentPage = Math.min(page, totalPages);
+
+  // Reset or clamp pagination when totalPages shrinks (e.g. searching/filtering)
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(1);
+    }
+  }, [totalPages, page]);
 
   const paginatedLabels = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
@@ -514,7 +521,7 @@ export function ShipmentTable({
               variant="outline"
               size="icon"
               className="h-8 w-8"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setPage(Math.max(1, currentPage - 1))}
               disabled={currentPage <= 1}
               title="Previous page"
             >
@@ -527,7 +534,7 @@ export function ShipmentTable({
               variant="outline"
               size="icon"
               className="h-8 w-8"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
               disabled={currentPage >= totalPages}
               title="Next page"
             >

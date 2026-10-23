@@ -1,3 +1,4 @@
+import { parseDtdcDate } from "../tracking/adapters/dtdc.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import dotenv from "dotenv";
@@ -627,7 +628,7 @@ test("TrackCourier Failover: Account 1 circuit-broken / 402 cascades to Account 
   }
 });
 
-test("DTDC Failover: Direct 401 cascades to TrackCourier Account 2, clears error on success, and does NOT trip DTDC circuit breaker with 402", async () => {
+test("DTDC Failover: Direct 401 trips direct breaker but cascades to TrackCourier Account 2 without lockout", async () => {
   const origDtdcToken = process.env.DTDC_API_TOKEN;
   const origKey1 = process.env.TRACKCOURIER_API_KEY;
   const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
@@ -641,13 +642,13 @@ test("DTDC Failover: Direct 401 cascades to TrackCourier Account 2, clears error
   resetCircuitBreaker("dtdc");
 
   const originalFetch = globalThis.fetch;
-  let dtdcDirectCalled = false;
-  let tcAccount2Called = false;
+  let dtdcDirectCalledCount = 0;
+  let tcAccount2CalledCount = 0;
 
   globalThis.fetch = async (url, options = {}) => {
     const urlStr = String(url);
     if (urlStr.includes("blktracksvc.dtdc.com")) {
-      dtdcDirectCalled = true;
+      dtdcDirectCalledCount++;
       return {
         ok: false,
         status: 401,
@@ -657,7 +658,7 @@ test("DTDC Failover: Direct 401 cascades to TrackCourier Account 2, clears error
     if (urlStr.includes("api.trackcourier.io")) {
       const key = options.headers?.["X-API-Key"];
       if (key === "mock_tc_key_2") {
-        tcAccount2Called = true;
+        tcAccount2CalledCount++;
         return {
           ok: true,
           status: 200,
@@ -682,14 +683,15 @@ test("DTDC Failover: Direct 401 cascades to TrackCourier Account 2, clears error
   };
 
   try {
+    // 1. Initial request: Direct DTDC 401 cascades to TrackCourier Account 2
     const res = await trackShipment("DTDC", "DTDC_FAILOVER_AWB_1", { force: true });
 
-    assert.equal(dtdcDirectCalled, true, "Direct DTDC API must be attempted first as direct courier integration");
-    assert.equal(tcAccount2Called, true, "TrackCourier Account 2 must be invoked when direct returns 401 and Account 1 is tripped");
+    assert.equal(dtdcDirectCalledCount, 1, "Direct DTDC API must be attempted first as direct courier integration");
+    assert.equal(tcAccount2CalledCount, 1, "TrackCourier Account 2 must be invoked when direct returns 401 and Account 1 is tripped");
     assert.equal(res.status, "Shipped");
     assert.equal(res.source, "trackcourier_account2");
     assert.equal(res.error, null, "Error must be cleared to null on fallback success");
-    assert.equal(isCircuitBreakerTripped("dtdc"), false, "DTDC circuit breaker must NOT be tripped when fallback succeeds");
+    assert.equal(isCircuitBreakerTripped("dtdc"), true, "Direct DTDC circuit breaker trips when direct API returns 401");
 
     const label = {
       status: "Pending",
@@ -698,6 +700,14 @@ test("DTDC Failover: Direct 401 cascades to TrackCourier Account 2, clears error
     applyTrackingResultToLabel(label, res);
     assert.equal(label.status, "Shipped");
     assert.equal(label.last_tracking_error, null, "UI notification error must be cleared");
+
+    // 2. Subsequent request: Verify tripped DTDC direct breaker does NOT suppress TrackCourier fallback!
+    const res2 = await trackShipment("DTDC", "DTDC_FAILOVER_AWB_2", { force: true });
+    assert.equal(dtdcDirectCalledCount, 1, "Direct DTDC API must NOT be re-attempted while breaker is tripped");
+    assert.equal(tcAccount2CalledCount, 2, "TrackCourier fallback must be invoked even when DTDC direct breaker is active");
+    assert.equal(res2.status, "Shipped");
+    assert.equal(res2.source, "trackcourier_account2");
+    assert.equal(res2.error, null, "Error must be null on fallback success");
   } finally {
     globalThis.fetch = originalFetch;
     process.env.DTDC_API_TOKEN = origDtdcToken;
@@ -707,5 +717,137 @@ test("DTDC Failover: Direct 401 cascades to TrackCourier Account 2, clears error
     resetCircuitBreaker("trackcourier_account2");
     resetCircuitBreaker("dtdc");
   }
+});
+
+test("DTDC Fallback: Exhausted quotas cascade across Account 1 -> Account 2 -> Account 3", async () => {
+  const origDtdcToken = process.env.DTDC_API_TOKEN;
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+  const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
+  const origKey3 = process.env.TRACKCOURIER_TERTIARY_API_KEY;
+
+  process.env.DTDC_API_TOKEN = "mock_dtdc_token";
+  process.env.TRACKCOURIER_API_KEY = "mock_tc_key_1";
+  process.env.TRACKCOURIER_BACKUP_API_KEY = "mock_tc_key_2";
+  process.env.TRACKCOURIER_TERTIARY_API_KEY = "mock_tc_key_3";
+
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+  resetCircuitBreaker("trackcourier_account3");
+  resetCircuitBreaker("dtdc");
+
+  const originalFetch = globalThis.fetch;
+  let account1Calls = 0;
+  let account2Calls = 0;
+  let account3Calls = 0;
+
+  globalThis.fetch = async (url, options = {}) => {
+    const urlStr = String(url);
+    if (urlStr.includes("blktracksvc.dtdc.com")) {
+      return { ok: false, status: 401, json: async () => ({ error: "Token expired" }) };
+    }
+    if (urlStr.includes("api.trackcourier.io")) {
+      const key = options.headers?.["X-API-Key"];
+      if (key === "mock_tc_key_1") {
+        account1Calls++;
+        return { ok: false, status: 402, json: async () => ({ success: false, error: "Quota exceeded" }) };
+      }
+      if (key === "mock_tc_key_2") {
+        account2Calls++;
+        return { ok: false, status: 402, json: async () => ({ success: false, error: "Quota exceeded" }) };
+      }
+      if (key === "mock_tc_key_3") {
+        account3Calls++;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: {
+              status: "delivered",
+              MostRecentStatus: "Delivered",
+              checkpoints: [{ time: "2026-10-23 11:00:00", status: "Delivered", location: "Bengaluru" }],
+            },
+          }),
+        };
+      }
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+
+  try {
+    const res = await trackShipment("DTDC", "DTDC_FAILOVER_CASCADE_1", { force: true });
+
+    assert.equal(account1Calls, 1, "Account 1 should be attempted first on fallback");
+    assert.equal(account2Calls, 1, "Account 2 should be attempted when Account 1 returns 402");
+    assert.equal(account3Calls, 1, "Account 3 should be attempted when Account 2 returns 402");
+    assert.equal(isCircuitBreakerTripped("trackcourier_account1"), true, "Account 1 breaker must trip on 402");
+    assert.equal(isCircuitBreakerTripped("trackcourier_account2"), true, "Account 2 breaker must trip on 402");
+    assert.equal(isCircuitBreakerTripped("trackcourier_account3"), false, "Account 3 breaker must NOT be tripped");
+    assert.equal(res.status, "Delivered");
+    assert.equal(res.source, "trackcourier_account3");
+    assert.equal(res.error, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.DTDC_API_TOKEN = origDtdcToken;
+    process.env.TRACKCOURIER_API_KEY = origKey1;
+    process.env.TRACKCOURIER_BACKUP_API_KEY = origKey2;
+    process.env.TRACKCOURIER_TERTIARY_API_KEY = origKey3;
+    resetCircuitBreaker("trackcourier_account1");
+    resetCircuitBreaker("trackcourier_account2");
+    resetCircuitBreaker("trackcourier_account3");
+    resetCircuitBreaker("dtdc");
+  }
+});
+
+test("DTDC Fallback: When direct fails and all TrackCourier accounts fail, returns composite error", async () => {
+  const origDtdcToken = process.env.DTDC_API_TOKEN;
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+
+  process.env.DTDC_API_TOKEN = "mock_dtdc_token";
+  process.env.TRACKCOURIER_API_KEY = "mock_tc_key_1";
+  delete process.env.TRACKCOURIER_BACKUP_API_KEY;
+  delete process.env.TRACKCOURIER_TERTIARY_API_KEY;
+
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("dtdc");
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const urlStr = String(url);
+    if (urlStr.includes("blktracksvc.dtdc.com")) {
+      return { ok: false, status: 401, json: async () => ({ error: "Auth failed" }) };
+    }
+    return { ok: false, status: 500, json: async () => ({ error: "Upstream down" }) };
+  };
+
+  try {
+    const res = await trackShipment("DTDC", "DTDC_ALL_FAIL_1", { force: true });
+    assert.ok(res.error, "Should return error when both direct and fallback fail");
+    assert.ok(res.error.includes("DTDC direct") && res.error.includes("TrackCourier fallback"), "Error should explain both direct and fallback failures");
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.DTDC_API_TOKEN = origDtdcToken;
+    process.env.TRACKCOURIER_API_KEY = origKey1;
+    resetCircuitBreaker("trackcourier_account1");
+    resetCircuitBreaker("dtdc");
+  }
+});
+
+test("DTDC Timezone: parseDtdcDate explicitly normalizes Indian Standard Time (IST) timestamps", () => {
+  // DD/MM/YYYY with 24-hour time in IST (+05:30)
+  const iso1 = parseDtdcDate("23/10/2026", "14:30:00");
+  assert.equal(iso1, "2026-10-23T09:00:00.000Z", "14:30 IST must equal 09:00 UTC");
+
+  // YYYY-MM-DD with 12-hour AM/PM time in IST
+  const iso2 = parseDtdcDate("2026-10-23", "02:30 PM");
+  assert.equal(iso2, "2026-10-23T09:00:00.000Z", "02:30 PM IST must equal 09:00 UTC");
+
+  // DD-MM-YYYY without time defaults to 00:00:00 IST (18:30:00Z previous day)
+  const iso3 = parseDtdcDate("23-10-2026", null);
+  assert.equal(iso3, "2026-10-22T18:30:00.000Z", "Midnight IST must equal 18:30 UTC of previous day");
+
+  // Invalid date returns null
+  assert.equal(parseDtdcDate("", "14:30"), null);
+  assert.equal(parseDtdcDate("invalid-date", "14:30"), null);
 });
 

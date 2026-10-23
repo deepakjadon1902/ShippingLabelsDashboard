@@ -3,27 +3,51 @@ import { fetchTrackCourier, hasTrackCourierKey } from "./trackcourier.js";
 import { isCircuitBreakerTripped } from "../controller.js";
 
 const COURIER_NAME = "DTDC";
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 export function hasDtdcToken() {
   return !!process.env.DTDC_API_TOKEN;
 }
 
 /**
- * Parses DTDC date string (e.g. DD/MM/YYYY or YYYY-MM-DD) and optional time
+ * Parses DTDC date string (e.g. DD/MM/YYYY or YYYY-MM-DD) and optional time.
+ * DTDC operates exclusively in Indian Standard Time (IST, UTC+05:30).
  */
-function parseDtdcDate(dateStr, timeStr) {
+export function parseDtdcDate(dateStr, timeStr) {
   if (!dateStr) return null;
   try {
     const cleanDate = String(dateStr).trim();
-    // Check if format is DD/MM/YYYY or DD-MM-YYYY
+    let year, month, day;
     const dmyMatch = cleanDate.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    const ymdMatch = cleanDate.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
     if (dmyMatch) {
-      const [_, day, month, year] = dmyMatch;
-      const timePart = timeStr ? ` ${String(timeStr).trim()}` : " 00:00:00";
-      const isoCandidate = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}${timePart}`);
+      [, day, month, year] = dmyMatch;
+    } else if (ymdMatch) {
+      [, year, month, day] = ymdMatch;
+    }
+
+    if (year && month && day) {
+      const y = year;
+      const m = month.padStart(2, "0");
+      const d = day.padStart(2, "0");
+      let timePart = "00:00:00";
+      if (timeStr) {
+        const cleanTime = String(timeStr).trim();
+        const timeMatch = cleanTime.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i);
+        if (timeMatch) {
+          let [_, h, min, sec, meridiem] = timeMatch;
+          let hour = parseInt(h, 10);
+          if (meridiem) {
+            if (meridiem.toUpperCase() === "PM" && hour < 12) hour += 12;
+            if (meridiem.toUpperCase() === "AM" && hour === 12) hour = 0;
+          }
+          timePart = `${String(hour).padStart(2, "0")}:${min}:${(sec || "00").padStart(2, "0")}`;
+        }
+      }
+      // Explicitly normalize domestic DTDC timestamps with Indian Standard Time offset (+05:30)
+      const isoCandidate = new Date(`${y}-${m}-${d}T${timePart}+05:30`);
       if (!isNaN(isoCandidate.getTime())) return isoCandidate.toISOString();
     }
+
     const directDate = new Date(cleanDate + (timeStr ? ` ${timeStr}` : ""));
     return isNaN(directDate.getTime()) ? null : directDate.toISOString();
   } catch {
@@ -34,10 +58,24 @@ function parseDtdcDate(dateStr, timeStr) {
 /**
  * Direct DTDC API call (PRIMARY)
  */
-async function fetchDtdcDirect(waybill) {
+export async function fetchDtdcDirect(waybill) {
   const token = process.env.DTDC_API_TOKEN;
   if (!token) {
-    return { ok: false, error: "Missing DTDC_API_TOKEN" };
+    return {
+      ok: false,
+      statusCode: 401,
+      isAuthError: true,
+      error: "Missing DTDC_API_TOKEN",
+      result: createTrackingResult({
+        courier: COURIER_NAME,
+        trackingNumber: waybill,
+        source: "direct",
+        provider: "DTDC Direct",
+        error: "Missing DTDC_API_TOKEN",
+        statusCode: 401,
+        isAuthError: true,
+      }),
+    };
   }
 
   try {
@@ -66,20 +104,61 @@ async function fetchDtdcDirect(waybill) {
         statusCode: 401,
         isAuthError: true,
         error: "DTDC Direct API Authentication Failed (HTTP 401: Token invalid or expired)",
+        result: createTrackingResult({
+          courier: COURIER_NAME,
+          trackingNumber: waybill,
+          source: "direct",
+          provider: "DTDC Direct",
+          error: "DTDC Direct API Authentication Failed (HTTP 401: Token invalid or expired)",
+          statusCode: 401,
+          isAuthError: true,
+        }),
       };
     }
     if (response.status === 404) {
-      return { ok: false, statusCode: 404, error: "Shipment not found in DTDC system" };
+      return {
+        ok: false,
+        statusCode: 404,
+        error: "Shipment not found in DTDC system",
+        result: createTrackingResult({
+          courier: COURIER_NAME,
+          trackingNumber: waybill,
+          source: "direct",
+          provider: "DTDC Direct",
+          error: "Shipment not found in DTDC system",
+          statusCode: 404,
+        }),
+      };
     }
     if (response.status >= 500) {
       return {
         ok: false,
         statusCode: response.status,
         error: `DTDC Direct API Server Error (HTTP ${response.status})`,
+        result: createTrackingResult({
+          courier: COURIER_NAME,
+          trackingNumber: waybill,
+          source: "direct",
+          provider: "DTDC Direct",
+          error: `DTDC Direct API Server Error (HTTP ${response.status})`,
+          statusCode: response.status,
+        }),
       };
     }
     if (!response.ok) {
-      return { ok: false, statusCode: response.status, error: `DTDC HTTP ${response.status}` };
+      return {
+        ok: false,
+        statusCode: response.status,
+        error: `DTDC HTTP ${response.status}`,
+        result: createTrackingResult({
+          courier: COURIER_NAME,
+          trackingNumber: waybill,
+          source: "direct",
+          provider: "DTDC Direct",
+          error: `DTDC HTTP ${response.status}`,
+          statusCode: response.status,
+        }),
+      };
     }
 
     const data = await response.json().catch(() => ({}));
@@ -119,11 +198,24 @@ async function fetchDtdcDirect(waybill) {
     const internalStatus = mapStatus(rawStatus) || mapStatus(latestEvent?.description);
 
     if (!rawStatus && !internalStatus && history.length === 0) {
-      return { ok: false, error: "No DTDC status in response" };
+      return {
+        ok: false,
+        statusCode: 404,
+        error: "No DTDC status in response",
+        result: createTrackingResult({
+          courier: COURIER_NAME,
+          trackingNumber: waybill,
+          source: "direct",
+          provider: "DTDC Direct",
+          error: "No DTDC status in response",
+          statusCode: 404,
+        }),
+      };
     }
 
     return {
       ok: true,
+      statusCode: 200,
       result: createTrackingResult({
         courier: COURIER_NAME,
         trackingNumber: waybill,
@@ -140,17 +232,26 @@ async function fetchDtdcDirect(waybill) {
       }),
     };
   } catch (error) {
-    if (error.name === "AbortError") {
-      return { ok: false, error: "DTDC Direct API request timed out" };
-    }
-    return { ok: false, error: error.message };
+    const isTimeout = error.name === "AbortError";
+    const errorMsg = isTimeout ? "DTDC Direct API request timed out" : error.message;
+    return {
+      ok: false,
+      statusCode: isTimeout ? 504 : 500,
+      error: errorMsg,
+      result: createTrackingResult({
+        courier: COURIER_NAME,
+        trackingNumber: waybill,
+        source: "direct",
+        provider: "DTDC Direct",
+        error: errorMsg,
+        statusCode: isTimeout ? 504 : 500,
+      }),
+    };
   }
 }
 
 /**
- * DTDC Tracking Adapter
- * 1. Primary: Direct DTDC API (Direct first choice where supported)
- * 2. Fallback: Multi-tier TrackCourier (Account 1 -> Account 2 -> Account 3)
+ * DTDC Tracking Adapter (Standalone fallback wrapper)
  *
  * @param {string} trackingNumber - DTDC Waybill / Consignment Number
  * @param {Object} options - Options including { lastTrackcourierSync, force }

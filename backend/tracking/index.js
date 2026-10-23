@@ -1,6 +1,7 @@
 import {
   createTrackingResult,
   isGenuinePickupScan,
+  isVerifiedPickupScan,
   mapStatus,
   isOutOfDelivery,
   detectRtoStatus,
@@ -504,7 +505,7 @@ export function applyTrackingResultToLabel(label, trackingResult) {
     for (let i = mergedHistory.length - 1; i >= 0; i--) {
       const c = mergedHistory[i];
       const desc = (c.description || c.status || "").toLowerCase();
-      if (isGenuinePickupScan(desc) || desc.includes("outscan")) {
+      if (isVerifiedPickupScan(desc)) {
         if (c.date) {
           const t = new Date(c.date).getTime();
           if (label.created_at) {

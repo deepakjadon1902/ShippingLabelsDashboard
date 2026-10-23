@@ -1,4 +1,4 @@
-import { createTrackingResult, mapStatus, isGenuinePickupScan } from "./base.js";
+import { createTrackingResult, mapStatus, isGenuinePickupScan, isVerifiedPickupScan } from "./base.js";
 
 /**
  * Supported courier slugs on TrackCourier.io
@@ -323,7 +323,7 @@ export async function fetchTrackCourier(courierName, waybill, options = {}) {
 
     for (let i = history.length - 1; i >= 0; i--) {
       const cp = history[i];
-      if (isGenuinePickupScan(cp.description || cp.status) && cp.date) {
+      if (isVerifiedPickupScan(cp.description || cp.status) && cp.date) {
         pickupAt = cp.date;
         break;
       }

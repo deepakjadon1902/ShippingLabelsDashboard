@@ -1,4 +1,4 @@
-import { createTrackingResult, mapStatus, isGenuinePickupScan } from "./base.js";
+import { createTrackingResult, mapStatus, isGenuinePickupScan, isVerifiedPickupScan } from "./base.js";
 
 const COURIER_NAME = "Shree Maruti Courier";
 const PROVIDER_NAME = "Shree Maruti Direct";
@@ -350,7 +350,7 @@ export async function trackShreeMaruti(trackingNumber, options = {}) {
       const s = sortedStatuses[i];
       const cat = String(s.category || "").toUpperCase().trim();
       const st = String(s.status || "").toLowerCase().trim();
-      if (isGenuinePickupScan(`${cat} ${st} ${s.subcategory || ""}`) || st.includes("outscan")) {
+      if (isVerifiedPickupScan(`${cat} ${st} ${s.subcategory || ""}`) || st.includes("outscan") || (s.subcategory || "").toLowerCase().includes("outscan")) {
         pickupAt = s.statusTimestamp
           ? new Date(Number(s.statusTimestamp)).toISOString()
           : s.createdAt

@@ -349,3 +349,33 @@ test("Pickup Workflow: applyTrackingResultToLabel preserves Ready to Pick and up
   assert.ok(label.pickup_at instanceof Date);
   assert.equal(label.pickup_at.toISOString(), "2026-10-23T11:45:00.000Z");
 });
+
+
+test("Pickup Workflow: Generic In Transit, Dispatched, Received at Hub, and OFD events do NOT fabricate pickup_at", () => {
+  const label = {
+    created_at: new Date("2026-10-20T10:00:00Z"),
+    status: "Ready to Pick",
+    pickup_at: null,
+    tracking_history: [],
+  };
+
+  // Downstream transit and OFD events without verified pickup scan
+  const downstreamResult = createTrackingResult({
+    courier: "Delhivery",
+    trackingNumber: "DEL_DOWNSTREAM_123",
+    status: "Shipped / Picked Up",
+    eventDescription: "Out for delivery to customer",
+    history: [
+      { date: "2026-10-23T09:00:00Z", description: "Out for delivery", status: "OFD" },
+      { date: "2026-10-22T18:00:00Z", description: "Received at delivery hub", status: "In Transit" },
+      { date: "2026-10-21T12:00:00Z", description: "Dispatched from sorting facility", status: "Dispatched" },
+    ],
+  });
+
+  applyTrackingResultToLabel(label, downstreamResult);
+
+  // Status must be Shipped / Picked Up, but pickup_at must NOT be fabricated from OFD or intermediate transit!
+  assert.equal(label.status, "Shipped / Picked Up");
+  assert.equal(label.pickup_at, null, "Generic downstream transit/OFD events must NEVER fabricate pickup_at");
+  assert.equal(label.tat_hours, null, "TAT must remain null when verified pickup timestamp is unavailable");
+});

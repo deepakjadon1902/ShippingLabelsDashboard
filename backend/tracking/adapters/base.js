@@ -64,6 +64,80 @@ export function isGenuinePickupScan(rawInput) {
 }
 
 /**
+ * Determines whether a checkpoint description indicates an actual verified
+ * physical pickup or origin inscan event (e.g. "picked up", "pickup completed", "inscan"),
+ * as opposed to generic downstream movement events (transit, hub arrivals, dispatched, OFD)
+ * or pre-pickup events.
+ *
+ * Used specifically to prevent generic transit/OFD events from fabricating pickup_at timestamps.
+ */
+export function isVerifiedPickupScan(rawInput) {
+  if (!rawInput) return false;
+  const s = String(rawInput).toLowerCase().trim();
+
+  // Disqualify pre-pickup qualifiers
+  if (
+    s.includes("scheduled") ||
+    s.includes("requested") ||
+    s.includes("arranged") ||
+    s.includes("assigned") ||
+    s.includes("pending") ||
+    s.includes("not attempted") ||
+    s.includes("unattempted") ||
+    s.includes("awaiting") ||
+    s.includes("ready to") ||
+    s.includes("ready for") ||
+    s.includes("manifest") ||
+    s.includes("booked") ||
+    s.includes("booking") ||
+    s.includes("data received") ||
+    s.includes("soft data") ||
+    s.includes("info received") ||
+    s.includes("inforeceived") ||
+    s.includes("label created") ||
+    s.includes("order created") ||
+    s.includes("order confirmed") ||
+    s.includes("order placed") ||
+    s.includes("not picked") ||
+    s === "bk"
+  ) {
+    return false;
+  }
+
+  // Disqualify final delivery or OFD events
+  if (
+    s.includes("out for delivery") ||
+    s.includes("out for del") ||
+    s.includes("ofd") ||
+    s.includes("delivery run") ||
+    s.includes("delivered") ||
+    s.includes("delivery attempt")
+  ) {
+    return false;
+  }
+
+  // Must match explicit physical pickup or inscan keywords
+  return (
+    s.includes("picked up") ||
+    s.includes("picked-up") ||
+    s.includes("pickup done") ||
+    s.includes("pickup completed") ||
+    s.includes("pickup successful") ||
+    s.includes("item picked") ||
+    s.includes("shipment picked") ||
+    s.includes("collected by courier") ||
+    s.includes("collected from sender") ||
+    s.includes("pickup scan") ||
+    s.includes("origin inscan") ||
+    s.includes("inscan at origin") ||
+    s.includes("first inscan") ||
+    s.includes("inward at origin") ||
+    s.includes("inscan") ||
+    s.includes("in-scan")
+  );
+}
+
+/**
  * Normalizes raw courier status into standard internal status:
  * "Ready to Pick" | "Shipped / Picked Up" | "Delivered" | "RTO" | null
  */
@@ -146,9 +220,6 @@ export function mapStatus(rawInput) {
   return null;
 }
 
-/**
- * Checks if status indicates "Out for Delivery"
- */
 export function isOutOfDelivery(rawInput) {
   if (!rawInput) return false;
   const raw = String(rawInput).toLowerCase();

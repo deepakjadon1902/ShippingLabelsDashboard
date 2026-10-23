@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createTrackingResult,
   mapStatus,
+  isGenuinePickupScan,
   detectRtoStatus,
   detectFailure,
   calculateTAT,
@@ -41,12 +42,100 @@ test("Courier Regression: TrackCourier slugs map accurately", () => {
 test("Courier Regression: Status mapping preserves data integrity", () => {
   assert.equal(mapStatus("delivered"), "Delivered");
   assert.equal(mapStatus("DELIVERED"), "Delivered");
-  assert.equal(mapStatus("in transit"), "Shipped");
-  assert.equal(mapStatus("out for delivery"), "Shipped");
-  assert.equal(mapStatus("booked"), "Shipped");
-  assert.equal(mapStatus("manifested"), "Pending");
+  assert.equal(mapStatus("in transit"), "Shipped / Picked Up");
+  assert.equal(mapStatus("out for delivery"), "Shipped / Picked Up");
+  assert.equal(mapStatus("picked up"), "Shipped / Picked Up");
+  assert.equal(mapStatus("inscan"), "Shipped / Picked Up");
+  assert.equal(mapStatus("booked"), "Ready to Pick");
+  assert.equal(mapStatus("bk"), "Ready to Pick");
+  assert.equal(mapStatus("manifested"), "Ready to Pick");
+  assert.equal(mapStatus("pickup scheduled"), "Ready to Pick");
+  assert.equal(mapStatus("pickup requested"), "Ready to Pick");
+  assert.equal(mapStatus("order confirmed"), "Ready to Pick");
+  assert.equal(mapStatus("ready to ship"), "Ready to Pick");
+  assert.equal(mapStatus("ready for dispatch"), "Ready to Pick");
   assert.equal(mapStatus("rto"), "RTO");
   assert.equal(mapStatus("returned"), "RTO");
+});
+
+test("Courier Regression: isGenuinePickupScan distinguishes pre-pickup events from physical scans", () => {
+  // Pre-pickup events MUST return false
+  assert.equal(isGenuinePickupScan("Pickup scheduled"), false);
+  assert.equal(isGenuinePickupScan("Pickup requested"), false);
+  assert.equal(isGenuinePickupScan("Pickup arranged"), false);
+  assert.equal(isGenuinePickupScan("Pickup assigned"), false);
+  assert.equal(isGenuinePickupScan("Pickup pending"), false);
+  assert.equal(isGenuinePickupScan("Pickup not attempted"), false);
+  assert.equal(isGenuinePickupScan("Awaiting pickup"), false);
+  assert.equal(isGenuinePickupScan("Ready to ship"), false);
+  assert.equal(isGenuinePickupScan("Ready for dispatch"), false);
+  assert.equal(isGenuinePickupScan("Manifest generated"), false);
+  assert.equal(isGenuinePickupScan("Consignment booked"), false);
+  assert.equal(isGenuinePickupScan("Data received"), false);
+  assert.equal(isGenuinePickupScan("Order confirmed"), false);
+  assert.equal(isGenuinePickupScan("Label created"), false);
+
+  // Genuine physical pickup and movement events MUST return true
+  assert.equal(isGenuinePickupScan("Shipment picked up"), true);
+  assert.equal(isGenuinePickupScan("Pickup done"), true);
+  assert.equal(isGenuinePickupScan("Pickup completed"), true);
+  assert.equal(isGenuinePickupScan("Pickup successful"), true);
+  assert.equal(isGenuinePickupScan("Item picked"), true);
+  assert.equal(isGenuinePickupScan("Inscan at origin hub"), true);
+  assert.equal(isGenuinePickupScan("Inward at hub"), true);
+  assert.equal(isGenuinePickupScan("Received at facility"), true);
+  assert.equal(isGenuinePickupScan("In transit to sorting center"), true);
+  assert.equal(isGenuinePickupScan("Dispatched from hub"), true);
+  assert.equal(isGenuinePickupScan("Out for delivery"), true);
+});
+
+test("Courier Regression: Pickup workflow prevents premature Shipped status on manifest/booking", () => {
+  const label = {
+    created_at: new Date("2026-10-23T10:00:00Z"),
+    status: "Ready to Pick",
+    pickup_at: null,
+    tracking_history: [],
+  };
+
+  // Step 1: Courier API returns "Pickup Scheduled" / "Booked" event
+  const bookingResult = createTrackingResult({
+    courier: "DTDC",
+    trackingNumber: "D12345",
+    status: mapStatus("Booked"),
+    rawStatus: "Booked",
+    eventDescription: "Pickup scheduled for today",
+    eventDate: "2026-10-23T10:30:00Z",
+    history: [
+      { date: "2026-10-23T10:30:00Z", description: "Pickup scheduled", status: "Booked" },
+    ],
+  });
+
+  applyTrackingResultToLabel(label, bookingResult);
+
+  // Must remain "Ready to Pick" and pickup_at must remain null!
+  assert.equal(label.status, "Ready to Pick");
+  assert.equal(label.pickup_at, null, "Pre-pickup event must NEVER set pickup_at");
+
+  // Step 2: Courier physically scans parcel at hub ("Inscan")
+  const pickupScanResult = createTrackingResult({
+    courier: "DTDC",
+    trackingNumber: "D12345",
+    status: mapStatus("Inscan at Hub"),
+    rawStatus: "Inscan",
+    eventDescription: "Parcel picked up and scanned at hub",
+    eventDate: "2026-10-23T14:15:00Z",
+    history: [
+      { date: "2026-10-23T14:15:00Z", description: "Parcel picked up at origin", status: "Inscan" },
+      { date: "2026-10-23T10:30:00Z", description: "Pickup scheduled", status: "Booked" },
+    ],
+  });
+
+  applyTrackingResultToLabel(label, pickupScanResult);
+
+  // Now status must transition to "Shipped / Picked Up" and pickup_at must be populated!
+  assert.equal(label.status, "Shipped / Picked Up");
+  assert.ok(label.pickup_at instanceof Date);
+  assert.equal(label.pickup_at.toISOString(), "2026-10-23T14:15:00.000Z");
 });
 
 test("Courier Regression: RTO lifecycle stages are accurately detected", () => {

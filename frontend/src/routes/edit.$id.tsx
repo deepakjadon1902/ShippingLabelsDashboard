@@ -107,6 +107,14 @@ function EditLabelPage() {
       ? (profiles.find((profile) => profile.id === senderChoice) ?? null)
       : null;
 
+  const availableStatuses = useMemo(() => {
+    const list = [...STATUSES];
+    if (form?.status && !list.includes(form.status)) {
+      list.push(form.status);
+    }
+    return list;
+  }, [form?.status]);
+
   const previewLabel: Label | null = useMemo(() => {
     if (!form) return null;
     return {
@@ -309,7 +317,7 @@ function EditLabelPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {STATUSES.map((s) => (
+                      {availableStatuses.map((s) => (
                         <SelectItem key={s} value={s}>
                           {s}
                         </SelectItem>

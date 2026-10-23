@@ -1,6 +1,12 @@
 import { getApiBaseUrl } from "./api-base";
 
-export type LabelStatus = "Pending" | "Shipped" | "Delivered" | "RTO";
+export type LabelStatus =
+  | "Ready to Pick"
+  | "Shipped / Picked Up"
+  | "Shipped"
+  | "Pending"
+  | "Delivered"
+  | "RTO";
 
 export interface TrackingHistoryItem {
   date?: string | null;
@@ -92,7 +98,12 @@ export const COMMON_COURIERS = [
   "India Post",
 ];
 
-export const STATUSES: LabelStatus[] = ["Pending", "Shipped", "Delivered", "RTO"];
+export const STATUSES: LabelStatus[] = [
+  "Ready to Pick",
+  "Shipped / Picked Up",
+  "Delivered",
+  "RTO",
+];
 
 const TRACKING_URLS: Record<string, (id: string) => string> = {
   Delhivery: (id) => `https://www.delhivery.com/tracking?tracking_id=${id}`,
@@ -132,6 +143,7 @@ export type OperationalStage =
   | "RTO Initiated"
   | "RTO"
   | "In Transit"
+  | "Ready to Pick"
   | "Pending";
 
 export function getOperationalStage(label: Label): OperationalStage {
@@ -165,10 +177,10 @@ export function getOperationalStage(label: Label): OperationalStage {
     }
     return "Failed / NDR";
   }
-  if (label.status === "Shipped" || label.pickup_at) {
+  if (label.status === "Shipped / Picked Up" || label.status === "Shipped" || label.pickup_at) {
     return "In Transit";
   }
-  return "Pending";
+  return "Ready to Pick";
 }
 
 export function isLabelDelayed(label: Label): boolean {

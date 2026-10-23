@@ -1,11 +1,71 @@
 /**
- * Base tracking utilities, status normalization, TAT calculation,
- * delay detection, and checkpoint de-duplication.
+ * Determines whether a status or checkpoint description indicates a genuine physical
+ * parcel pickup or subsequent transit scan by the courier, as opposed to a pre-pickup
+ * event (booking, manifest, pickup scheduled, info received, etc.).
  */
+export function isGenuinePickupScan(rawInput) {
+  if (!rawInput) return false;
+  const s = String(rawInput).toLowerCase().trim();
+
+  // Explicit pre-pickup qualifiers that disqualify as a physical pickup scan
+  if (
+    s.includes("scheduled") ||
+    s.includes("requested") ||
+    s.includes("arranged") ||
+    s.includes("assigned") ||
+    s.includes("pending") ||
+    s.includes("not attempted") ||
+    s.includes("unattempted") ||
+    s.includes("awaiting") ||
+    s.includes("ready to") ||
+    s.includes("ready for") ||
+    s.includes("manifest") ||
+    s.includes("booked") ||
+    s.includes("booking") ||
+    s.includes("data received") ||
+    s.includes("soft data") ||
+    s.includes("info received") ||
+    s.includes("inforeceived") ||
+    s.includes("label created") ||
+    s.includes("order created") ||
+    s.includes("order confirmed") ||
+    s.includes("order placed") ||
+    s.includes("not picked") ||
+    s === "bk"
+  ) {
+    return false;
+  }
+
+  // Genuine physical collection or transit progression
+  return (
+    s.includes("picked up") ||
+    s.includes("picked-up") ||
+    s.includes("pickup done") ||
+    s.includes("pickup completed") ||
+    s.includes("pickup successful") ||
+    s.includes("item picked") ||
+    s.includes("shipment picked") ||
+    s.includes("collected by courier") ||
+    s.includes("collected from sender") ||
+    s.includes("inscan") ||
+    s.includes("in-scan") ||
+    s.includes("inward") ||
+    s.includes("received at") ||
+    s.includes("arrived at") ||
+    s.includes("in transit") ||
+    s.includes("intransit") ||
+    s.includes("dispatched") ||
+    s.includes("departed") ||
+    s.includes("out for delivery") ||
+    s.includes("out for del") ||
+    s.includes("ofd") ||
+    s === "it"
+  );
+}
 
 /**
  * Normalizes raw courier status into standard internal status:
- * "Pending" | "Shipped" | "Delivered" | "RTO" | null
+ * "Ready to Pick" | "Shipped / Picked Up" | "Delivered" | "RTO" | null
  */
 export function mapStatus(rawInput) {
   if (!rawInput) return null;
@@ -41,44 +101,46 @@ export function mapStatus(rawInput) {
     return "RTO";
   }
 
-  // Pending / Manifested / Ready to Ship / Pickup scheduled / Info received
+  // Pre-pickup events -> "Ready to Pick"
   if (
+    raw === "ready to pick" ||
     raw === "pending" ||
     raw.includes("pending") ||
     raw.includes("manifest") ||
     raw.includes("ready to ship") ||
+    raw.includes("ready to be dispatched") ||
+    raw.includes("ready for dispatch") ||
+    raw.includes("ready for pickup") ||
     raw.includes("pickup scheduled") ||
+    raw.includes("pickup requested") ||
+    raw.includes("pickup booked") ||
+    raw.includes("pickup arranged") ||
+    raw.includes("pickup assigned") ||
     raw.includes("pickup not attempted") ||
     raw.includes("pickup pending") ||
     raw.includes("pickup unattempted") ||
+    raw.includes("awaiting pickup") ||
     raw.includes("info received") ||
+    raw.includes("inforeceived") ||
+    raw.includes("info_received") ||
     raw.includes("data received") ||
+    raw.includes("soft data") ||
     raw.includes("label created") ||
     raw.includes("order created") ||
+    raw.includes("order confirmed") ||
     raw.includes("order placed") ||
-    raw.includes("not picked")
-  ) {
-    return "Pending";
-  }
-
-  // Shipped / In Transit / Picked / Dispatched / Out for Delivery / Booked
-  if (
-    raw.includes("in transit") ||
-    raw.includes("intransit") ||
-    raw.includes("transit") ||
-    raw.includes("dispatch") ||
-    raw.includes("shipped") ||
-    raw.includes("out for delivery") ||
-    raw.includes("out for del") ||
-    raw.includes("ofd") ||
-    raw.includes("picked") ||
-    raw.includes("pickup") ||
+    raw.includes("not picked") ||
     raw.includes("booked") ||
     raw.includes("available_for_pickup") ||
-    raw === "it" ||
+    raw.includes("available for pickup") ||
     raw === "bk"
   ) {
-    return "Shipped";
+    return "Ready to Pick";
+  }
+
+  // Genuine physical pickup confirmation or transit movement -> "Shipped / Picked Up"
+  if (isGenuinePickupScan(raw)) {
+    return "Shipped / Picked Up";
   }
 
   return null;

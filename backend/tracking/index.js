@@ -1,5 +1,6 @@
 import {
   createTrackingResult,
+  isGenuinePickupScan,
   mapStatus,
   isOutOfDelivery,
   detectRtoStatus,
@@ -503,14 +504,7 @@ export function applyTrackingResultToLabel(label, trackingResult) {
     for (let i = mergedHistory.length - 1; i >= 0; i--) {
       const c = mergedHistory[i];
       const desc = (c.description || c.status || "").toLowerCase();
-      if (
-        desc.includes("pick") ||
-        desc.includes("received") ||
-        desc.includes("in transit") ||
-        desc.includes("inscan") ||
-        desc.includes("outscan") ||
-        desc.includes("dispatched")
-      ) {
+      if (isGenuinePickupScan(desc) || desc.includes("outscan")) {
         if (c.date) {
           const t = new Date(c.date).getTime();
           if (label.created_at) {
@@ -564,12 +558,29 @@ export function applyTrackingResultToLabel(label, trackingResult) {
   const newStatus = trackingResult.status;
 
   if (prevStatus === "Delivered" && newStatus && newStatus !== "Delivered") {
-    // Conflict protection: Never downgrade a confirmed Delivered shipment due to incomplete response
-    label.api_status_conflict = `API Conflict: response reported "${newStatus}" but shipment was already confirmed Delivered`;
-  } else if (newStatus && prevStatus !== "Delivered" && prevStatus !== "RTO") {
-    label.status = newStatus;
-    label.api_status_conflict = null;
-  }
+      // Conflict protection: Never downgrade a confirmed Delivered shipment due to incomplete response
+      label.api_status_conflict = `API Conflict: response reported "${newStatus}" but shipment was already confirmed Delivered`;
+    } else if (newStatus && prevStatus !== "Delivered" && prevStatus !== "RTO") {
+      if (
+        (prevStatus === "Shipped / Picked Up" || prevStatus === "Shipped") &&
+        (newStatus === "Ready to Pick" || newStatus === "Pending")
+      ) {
+        label.api_status_conflict = `API Notice: courier reported "${trackingResult.rawStatus || newStatus}" after shipment was already picked up/dispatched`;
+      } else {
+        label.status = newStatus;
+        label.api_status_conflict = null;
+      }
+    }
+  
+    // If label has verified physical pickup_at and is still in pre-pickup state, promote to Shipped / Picked Up
+    if (
+      label.pickup_at &&
+      (label.status === "Ready to Pick" || label.status === "Pending") &&
+      prevStatus !== "Delivered" &&
+      prevStatus !== "RTO"
+    ) {
+      label.status = "Shipped / Picked Up";
+    }
 
   // Delivery timestamp detection
   if (trackingResult.deliveredAt) {

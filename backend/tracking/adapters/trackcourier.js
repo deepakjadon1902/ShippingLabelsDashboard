@@ -1,4 +1,4 @@
-import { createTrackingResult, mapStatus } from "./base.js";
+import { createTrackingResult, mapStatus, isGenuinePickupScan } from "./base.js";
 
 /**
  * Supported courier slugs on TrackCourier.io
@@ -112,11 +112,11 @@ export function getTrackCourierSlug(courierName) {
 function normalizeTrackCourierStatus(rawStatus, mostRecentStatus) {
   const s = String(rawStatus || "").toLowerCase().trim();
   if (s === "delivered") return "Delivered";
-  if (s === "out_for_delivery" || s === "outfordelivery") return "Shipped";
-  if (s === "in_transit" || s === "intransit") return "Shipped";
-  if (s === "pending" || s === "inforeceived" || s === "info_received") return "Pending";
+  if (s === "out_for_delivery" || s === "outfordelivery") return "Shipped / Picked Up";
+  if (s === "in_transit" || s === "intransit") return "Shipped / Picked Up";
+  if (s === "pending" || s === "inforeceived" || s === "info_received" || s === "pickup_scheduled") return "Ready to Pick";
   if (s === "exception") {
-    return mapStatus(mostRecentStatus) || "Shipped";
+    return mapStatus(mostRecentStatus) || "Shipped / Picked Up";
   }
   return mapStatus(rawStatus) || mapStatus(mostRecentStatus) || null;
 }
@@ -280,12 +280,8 @@ export async function fetchTrackCourier(courierName, waybill, options = {}) {
       null;
     const estimatedDelivery = data.ExpectedDeliveryDate || null;
 
+    // pickupAt is resolved from genuine physical checkpoints below
     let pickupAt = null;
-    if (data.ShipmentSummary?.booked_on_date) {
-      const timePart = data.ShipmentSummary.booked_on_time ? ` ${data.ShipmentSummary.booked_on_time}` : "";
-      const parsed = new Date(`${data.ShipmentSummary.booked_on_date}${timePart}`);
-      if (!isNaN(parsed.getTime())) pickupAt = parsed.toISOString();
-    }
 
     let deliveredAt = null;
     if (data.ShipmentSummary?.delivered_on_date) {
@@ -324,6 +320,14 @@ export async function fetchTrackCourier(courierName, waybill, options = {}) {
         };
       })
       .sort((a, b) => (new Date(b.date || 0) > new Date(a.date || 0) ? 1 : -1));
+
+    for (let i = history.length - 1; i >= 0; i--) {
+      const cp = history[i];
+      if (isGenuinePickupScan(cp.description || cp.status) && cp.date) {
+        pickupAt = cp.date;
+        break;
+      }
+    }
 
     const latestCheckpoint = history[0];
     const location = latestCheckpoint?.location || destination || origin || null;

@@ -260,7 +260,11 @@ function Dashboard() {
       } else if (stage === "Delivery Attempted" || stage === "Failed / NDR") {
         failedAttempts++;
         shipped++;
-      } else if (l.status === "Shipped" || stage === "In Transit") {
+      } else if (
+        l.status === "Shipped / Picked Up" ||
+        l.status === "Shipped" ||
+        stage === "In Transit"
+      ) {
         shipped++;
       } else {
         pending++;
@@ -277,6 +281,7 @@ function Dashboard() {
       delivered,
       shipped,
       pending,
+      readyToPick: pending,
       rto,
       rtoInitiated,
       rtoReturned,
@@ -326,8 +331,24 @@ function Dashboard() {
         if (statusFilter === "RTO_Returned" && stage !== "RTO Returned") return false;
         if (statusFilter === "RTO" && l.status !== "RTO" && !stage.startsWith("RTO")) return false;
         if (statusFilter === "Delayed" && !isLabelDelayed(l)) return false;
-        if (
-          ["Pending", "Shipped", "Delivered"].includes(statusFilter) &&
+        if (statusFilter === "Ready to Pick" || statusFilter === "Pending") {
+          if (
+            l.status !== "Ready to Pick" &&
+            l.status !== "Pending" &&
+            stage !== "Ready to Pick"
+          ) {
+            return false;
+          }
+        } else if (statusFilter === "Shipped" || statusFilter === "Shipped / Picked Up") {
+          if (
+            l.status !== "Shipped" &&
+            l.status !== "Shipped / Picked Up" &&
+            stage !== "In Transit"
+          ) {
+            return false;
+          }
+        } else if (
+          ["Delivered"].includes(statusFilter) &&
           l.status !== statusFilter &&
           stage !== statusFilter
         ) {
@@ -573,13 +594,16 @@ function Dashboard() {
         />
 
         <KpiCard
-          label="Pending Pickup"
-          value={kpis.pending}
+          label="Ready to Pick"
+          value={kpis.readyToPick}
           icon={<Clock className="h-4 w-4 text-amber-600" />}
-          active={activeTab === "shipments" && statusFilter === "Pending"}
+          active={
+            activeTab === "shipments" &&
+            (statusFilter === "Ready to Pick" || statusFilter === "Pending")
+          }
           onClick={() => {
             setTab("shipments");
-            setStatusFilter("Pending");
+            setStatusFilter("Ready to Pick");
           }}
         />
 
@@ -764,8 +788,8 @@ function Dashboard() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Operational Stages</SelectItem>
-                      <SelectItem value="Pending">Pending</SelectItem>
-                      <SelectItem value="Shipped">In Transit</SelectItem>
+                      <SelectItem value="Ready to Pick">Ready to Pick</SelectItem>
+                      <SelectItem value="Shipped">In Transit / Shipped</SelectItem>
                       <SelectItem value="OFD">Out for Delivery</SelectItem>
                       <SelectItem value="Attempted">Delivery Attempted</SelectItem>
                       <SelectItem value="Failed">Failed / NDR</SelectItem>

@@ -292,7 +292,7 @@ function buildLabelPayload(body, partial = false) {
     }
     payload.status = body.status;
   } else if (!partial) {
-    payload.status = "Pending";
+    payload.status = "Ready to Pick";
   }
 
   return payload;

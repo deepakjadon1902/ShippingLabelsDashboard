@@ -1,6 +1,13 @@
 import mongoose from "mongoose";
 
-export const STATUSES = ["Pending", "Shipped", "Delivered", "RTO"];
+export const STATUSES = [
+  "Ready to Pick",
+  "Shipped / Picked Up",
+  "Shipped",
+  "Pending",
+  "Delivered",
+  "RTO",
+];
 
 export const labelSchema = new mongoose.Schema(
   {
@@ -15,7 +22,7 @@ export const labelSchema = new mongoose.Schema(
     courier_name: { type: String, required: true, trim: true },
     tracking_id: { type: String, required: true, trim: true },
     order_reference: { type: String, default: null, trim: true },
-    status: { type: String, enum: STATUSES, default: "Pending" },
+    status: { type: String, enum: STATUSES, default: "Ready to Pick" },
     notes: { type: String, default: null, trim: true },
 
     // Tracking timestamps & audit

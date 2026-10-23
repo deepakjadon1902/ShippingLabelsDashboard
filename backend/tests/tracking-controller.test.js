@@ -688,7 +688,7 @@ test("DTDC Failover: Direct 401 trips direct breaker but cascades to TrackCourie
 
     assert.equal(dtdcDirectCalledCount, 1, "Direct DTDC API must be attempted first as direct courier integration");
     assert.equal(tcAccount2CalledCount, 1, "TrackCourier Account 2 must be invoked when direct returns 401 and Account 1 is tripped");
-    assert.equal(res.status, "Shipped");
+    assert.equal(res.status, "Shipped / Picked Up");
     assert.equal(res.source, "trackcourier_account2");
     assert.equal(res.error, null, "Error must be cleared to null on fallback success");
     assert.equal(isCircuitBreakerTripped("dtdc"), true, "Direct DTDC circuit breaker trips when direct API returns 401");
@@ -698,14 +698,14 @@ test("DTDC Failover: Direct 401 trips direct breaker but cascades to TrackCourie
       last_tracking_error: "Previous error",
     };
     applyTrackingResultToLabel(label, res);
-    assert.equal(label.status, "Shipped");
+    assert.equal(label.status, "Shipped / Picked Up");
     assert.equal(label.last_tracking_error, null, "UI notification error must be cleared");
 
     // 2. Subsequent request: Verify tripped DTDC direct breaker does NOT suppress TrackCourier fallback!
     const res2 = await trackShipment("DTDC", "DTDC_FAILOVER_AWB_2", { force: true });
     assert.equal(dtdcDirectCalledCount, 1, "Direct DTDC API must NOT be re-attempted while breaker is tripped");
     assert.equal(tcAccount2CalledCount, 2, "TrackCourier fallback must be invoked even when DTDC direct breaker is active");
-    assert.equal(res2.status, "Shipped");
+    assert.equal(res2.status, "Shipped / Picked Up");
     assert.equal(res2.source, "trackcourier_account2");
     assert.equal(res2.error, null, "Error must be null on fallback success");
   } finally {

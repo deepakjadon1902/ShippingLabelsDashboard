@@ -177,15 +177,18 @@ export function normalizeShadowfaxStatus(rawStatus, statusDisplay) {
 
   // Pending / Manifest / Unassigned
   if (
-    combined.includes("pending") ||
-    combined.includes("manifest") ||
-    combined.includes("allocated") ||
-    combined.includes("unassigned") ||
-    combined.includes("order placed") ||
-    combined.includes("order created")
-  ) {
-    return "Pending";
-  }
+      combined.includes("ready to pick") ||
+      combined.includes("pending") ||
+      combined.includes("manifest") ||
+      combined.includes("allocated") ||
+      combined.includes("unassigned") ||
+      combined.includes("order placed") ||
+      combined.includes("order created") ||
+      combined.includes("pickup scheduled") ||
+      combined.includes("pickup requested")
+    ) {
+      return "Ready to Pick";
+    }
 
   // Shipped / In Transit / Out for Delivery / Picked up
   if (
@@ -199,7 +202,7 @@ export function normalizeShadowfaxStatus(rawStatus, statusDisplay) {
     combined.includes("dispatched") ||
     combined.includes("ofd")
   ) {
-    return "Shipped";
+    return "Shipped / Picked Up";
   }
 
   return mapStatus(statusDisplay) || mapStatus(rawStatus) || null;

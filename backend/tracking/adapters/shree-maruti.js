@@ -1,4 +1,4 @@
-import { createTrackingResult, mapStatus } from "./base.js";
+import { createTrackingResult, mapStatus, isGenuinePickupScan } from "./base.js";
 
 const COURIER_NAME = "Shree Maruti Courier";
 const PROVIDER_NAME = "Shree Maruti Direct";
@@ -66,7 +66,7 @@ function normalizeShreeMarutiStatus(category, subcategory, rawStatus) {
     sub.includes("out for del") ||
     sub === "ofd"
   ) {
-    return "Shipped";
+    return "Shipped / Picked Up";
   }
 
   // 4. In Transit
@@ -79,7 +79,7 @@ function normalizeShreeMarutiStatus(category, subcategory, rawStatus) {
     raw.includes("inscan") ||
     raw.includes("outscan")
   ) {
-    return "Shipped";
+    return "Shipped / Picked Up";
   }
 
   // 5. Pending / Pickup
@@ -91,7 +91,7 @@ function normalizeShreeMarutiStatus(category, subcategory, rawStatus) {
     sub.includes("manifested") ||
     sub.includes("booked")
   ) {
-    return "Pending";
+    return "Ready to Pick";
   }
 
   // Fallback to base status mapper
@@ -350,13 +350,7 @@ export async function trackShreeMaruti(trackingNumber, options = {}) {
       const s = sortedStatuses[i];
       const cat = String(s.category || "").toUpperCase().trim();
       const st = String(s.status || "").toLowerCase().trim();
-      if (
-        cat === "IN_TRANSIT" ||
-        st.includes("inscan") ||
-        st.includes("outscan") ||
-        st.includes("pickup") ||
-        st.includes("dispatched")
-      ) {
+      if (isGenuinePickupScan(`${cat} ${st} ${s.subcategory || ""}`) || st.includes("outscan")) {
         pickupAt = s.statusTimestamp
           ? new Date(Number(s.statusTimestamp)).toISOString()
           : s.createdAt

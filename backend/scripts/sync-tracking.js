@@ -134,9 +134,9 @@ async function runSync() {
         // Tally status distribution
         const currentStatus = label.status;
         if (currentStatus === "Delivered") stats.delivered++;
-        else if (currentStatus === "Shipped") stats.shipped++;
+        else if (currentStatus === "Shipped" || currentStatus === "Shipped / Picked Up") stats.shipped++;
         else if (currentStatus === "RTO") stats.rto++;
-        else if (currentStatus === "Pending") stats.pending++;
+        else if (currentStatus === "Pending" || currentStatus === "Ready to Pick") stats.pending++;
 
         if (result.statusChanged || initialStatus !== currentStatus) {
           stats.updated++;

@@ -1,4 +1,4 @@
-import { createTrackingResult, mapStatus, detectRtoStatus, isOutOfDelivery } from "./base.js";
+import { createTrackingResult, mapStatus, detectRtoStatus, isOutOfDelivery, isGenuinePickupScan } from "./base.js";
 import { fetchTrackCourier, hasTrackCourierKey } from "./trackcourier.js";
 
 const COURIER_NAME = "Delhivery";
@@ -83,8 +83,7 @@ async function fetchDelhiveryDirect(waybill) {
         : shipmentData.DeliveryLocation || null);
 
     // Pickup & Delivery Timestamps
-    const pickupAt = shipmentData.PickUpDate || shipmentData.PickedupDate || null;
-    const isDeliveredStatus =
+        const isDeliveredStatus =
       (statusObj?.Status || "").toLowerCase() === "delivered" ||
       (statusObj?.Instructions || "").toLowerCase().includes("delivered");
     const deliveredAt =
@@ -100,6 +99,13 @@ async function fetchDelhiveryDirect(waybill) {
 
     // Check scans history if present
     const rawScans = Array.isArray(shipmentData.Scans) ? shipmentData.Scans : [];
+        const hasPhysicalScan =
+          isGenuinePickupScan(rawStatus) ||
+          rawScans.some((scan) => {
+            const detail = scan.ScanDetail || scan;
+            return isGenuinePickupScan(detail.Instructions || detail.Scan || "");
+          });
+        const pickupAt = hasPhysicalScan ? (shipmentData.PickUpDate || shipmentData.PickedupDate || null) : null;
     const history = rawScans
       .map((scan) => {
         const detail = scan.ScanDetail || scan;

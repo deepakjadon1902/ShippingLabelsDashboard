@@ -66,7 +66,7 @@ const emptyForm: LabelInput = {
   courier_name: "",
   tracking_id: "",
   order_reference: "",
-  status: "Pending",
+  status: "Ready to Pick",
   notes: "",
   sender_name: "",
   sender_address: "",

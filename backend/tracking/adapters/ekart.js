@@ -1,6 +1,7 @@
 import {
   createTrackingResult,
   mapStatus,
+  isGenuinePickupScan,
   detectRtoStatus,
   detectFailure,
   isOutOfDelivery,
@@ -54,9 +55,10 @@ export function mapEkartStatus(rawStatus) {
     s.includes("pickup not attempted") ||
     s.includes("not picked") ||
     s.includes("manifest") ||
-    s.includes("label created")
+    s.includes("label created") ||
+    s.includes("booked")
   ) {
-    return "Pending";
+    return "Ready to Pick";
   }
 
   // Shipped / Transit / OFD / Delayed
@@ -69,9 +71,9 @@ export function mapEkartStatus(rawStatus) {
     s.includes("ofd") ||
     s.includes("shipment delayed") ||
     s.includes("dispatched") ||
-    s.includes("booked")
+    s.includes("inscan")
   ) {
-    return "Shipped";
+    return "Shipped / Picked Up";
   }
 
   return mapStatus(rawStatus);
@@ -173,7 +175,8 @@ export async function trackEkart(trackingNumber) {
     const eventDate = toIsoDate(trackObj.ctime);
     const eventDescription = trackObj.desc || rawStatus || null;
     const estimatedDelivery = toIsoDate(data.edd);
-    const pickupAt = toIsoDate(trackObj.pickupTime);
+    const hasPhysicalScan = isGenuinePickupScan(rawStatus) || rawDetails.some((d) => isGenuinePickupScan(d?.desc || d?.status || ""));
+    const pickupAt = hasPhysicalScan ? toIsoDate(trackObj.pickupTime) : null;
 
     // Parse chronological details checkpoints
     const rawDetails = Array.isArray(trackObj.details) ? trackObj.details : [];

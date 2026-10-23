@@ -339,11 +339,11 @@ export function ShipmentTable({
 
                   {/* 7. TAT */}
                   <TableCell className="py-2.5 px-3">
-                    {label.tat_hours != null && !isNaN(label.tat_hours) ? (
+                    {label.tat_hours != null && !isNaN(label.tat_hours) && label.pickup_at ? (
                       <span className="font-mono font-bold text-foreground bg-muted/80 px-1.5 py-0.5 rounded text-[11px]">
                         {formatCompactDuration(label.tat_hours * 3600 * 1000)}
                       </span>
-                    ) : label.tat_display ? (
+                    ) : label.tat_display && label.pickup_at ? (
                       <span className="font-medium text-foreground bg-muted/80 px-1.5 py-0.5 rounded text-[11px]">
                         {label.tat_display}
                       </span>

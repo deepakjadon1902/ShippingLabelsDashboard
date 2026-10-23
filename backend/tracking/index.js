@@ -359,7 +359,29 @@ export function applyTrackingResultToLabel(label, trackingResult) {
   }
 
   // De-duplicate and merge checkpoints
-  const mergedHistory = mergeCheckpoints(label.tracking_history || [], trackingResult.history || []);
+  let mergedHistory = mergeCheckpoints(label.tracking_history || [], trackingResult.history || []);
+
+  // Filter out any stale recycled AWB checkpoints from prior lifecycles.
+  const referenceStartTime = trackingResult.pickupAt
+    ? new Date(trackingResult.pickupAt).getTime()
+    : (label.created_at ? new Date(label.created_at).getTime() : null);
+
+  if (referenceStartTime && !isNaN(referenceStartTime)) {
+    const filteredHistory = mergedHistory.filter((c) => {
+      if (!c.date) return true;
+      const t = new Date(c.date).getTime();
+      if (isNaN(t)) return true;
+      // Allow up to 48 hours for label creation / booking leeway
+      if (t < referenceStartTime - 48 * 3600 * 1000) {
+        return false;
+      }
+      return true;
+    });
+    if (filteredHistory.length > 0) {
+      mergedHistory = filteredHistory;
+    }
+  }
+
   label.tracking_history = mergedHistory;
 
   // Route locations: Use direct courier route if provided, otherwise fallback to address/checkpoints
@@ -392,12 +414,20 @@ export function applyTrackingResultToLabel(label, trackingResult) {
       const desc = (c.description || c.status || "").toLowerCase();
       if (
         desc.includes("pick") ||
-        desc.includes("book") ||
-        desc.includes("manifest") ||
         desc.includes("received") ||
-        desc.includes("in transit")
+        desc.includes("in transit") ||
+        desc.includes("inscan") ||
+        desc.includes("outscan") ||
+        desc.includes("dispatched")
       ) {
         if (c.date) {
+          const t = new Date(c.date).getTime();
+          if (label.created_at) {
+            const lCreate = new Date(label.created_at).getTime();
+            if (!isNaN(lCreate) && t < lCreate - 48 * 3600 * 1000) {
+              continue;
+            }
+          }
           label.pickup_at = new Date(c.date);
           break;
         }
@@ -471,11 +501,16 @@ export function applyTrackingResultToLabel(label, trackingResult) {
   }
 
   // Calculate TAT (Turnaround Time)
-  if (label.delivered_at) {
-    const startPoint = label.pickup_at || label.created_at;
-    const tat = calculateTAT(startPoint, label.delivered_at);
+  // Delivery TAT is strictly from verified dispatch/pickup to delivery.
+  // If the courier partner does not provide a reliable dispatch/pickup timestamp,
+  // delivery TAT is left null / unavailable rather than inventing a duration from order creation.
+  if (label.delivered_at && label.pickup_at) {
+    const tat = calculateTAT(label.pickup_at, label.delivered_at);
     label.tat_hours = tat.tatHours;
     label.tat_display = tat.tatDisplay;
+  } else {
+    label.tat_hours = null;
+    label.tat_display = null;
   }
 
   // Calculate delay against expected delivery

@@ -85,11 +85,9 @@ export function AnalyticsCharts({ labels }: AnalyticsChartsProps) {
 
       if (l.status === "Delivered") {
         const pickupMs = l.pickup_at ? new Date(l.pickup_at).getTime() : null;
-        const createdMs = l.created_at ? new Date(l.created_at).getTime() : null;
         const deliveredMs = l.delivered_at ? new Date(l.delivered_at).getTime() : null;
-        const start = pickupMs || createdMs;
-        if (start && deliveredMs && deliveredMs >= start) {
-          item.allTatMs.push(deliveredMs - start);
+        if (pickupMs && deliveredMs && deliveredMs >= pickupMs) {
+          item.allTatMs.push(deliveredMs - pickupMs);
         }
       }
     }

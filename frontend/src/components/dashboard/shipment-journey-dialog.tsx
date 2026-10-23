@@ -162,10 +162,10 @@ export function ShipmentJourneyDialog({
               </DialogDescription>
             </div>
 
-            {(tatMetrics.pickupToDeliveredDisplay || label.tat_display) && (
+            {(tatMetrics.pickupToDeliveredDisplay || (label.pickup_at ? label.tat_display : null)) && (
               <Badge variant="secondary" className="text-xs px-2.5 py-1 font-bold gap-1">
                 <Timer className="h-3.5 w-3.5 text-primary shrink-0" />
-                TAT: {tatMetrics.pickupToDeliveredDisplay || label.tat_display}
+                TAT: {tatMetrics.pickupToDeliveredDisplay || (label.pickup_at ? label.tat_display : null)}
               </Badge>
             )}
           </div>
@@ -219,7 +219,7 @@ export function ShipmentJourneyDialog({
                 <div className="text-sm font-bold text-foreground mt-0.5">
                   {tatMetrics.pickupToDeliveredDisplay ||
                     (label.status === "Delivered"
-                      ? label.tat_display || "Not available from courier"
+                      ? (label.pickup_at ? label.tat_display : null) || "Not available from courier"
                       : label.status === "RTO"
                         ? tatMetrics.pickupToRtoReturnedDisplay
                           ? `${tatMetrics.pickupToRtoReturnedDisplay} (RTO)`

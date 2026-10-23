@@ -245,8 +245,50 @@ export async function trackShreeMaruti(trackingNumber, options = {}) {
     // Process Statuses & Checkpoint History
     const rawStatuses = Array.isArray(data.statuses) ? data.statuses : [];
 
+    // 1. Determine consignment booking timestamp
+    let orderCreatedAt = data.orderInformation?.createdAt
+      ? new Date(data.orderInformation.createdAt).getTime()
+      : null;
+
+    if (!orderCreatedAt || isNaN(orderCreatedAt)) {
+      // Find earliest booking / confirmation event if orderInformation.createdAt is missing
+      for (const s of rawStatuses) {
+        const cat = String(s.category || "").toUpperCase().trim();
+        const sub = String(s.subcategory || "").toLowerCase().trim();
+        if (
+          cat === "ORDER_CONFIRMED" ||
+          cat === "READY_FOR_DISPATCH" ||
+          sub.includes("order has been confirmed") ||
+          sub.includes("ready to be dispatched") ||
+          sub.includes("manifested") ||
+          sub.includes("booked")
+        ) {
+          const t = Number(s.statusTimestamp || (s.createdAt ? new Date(s.createdAt).getTime() : 0));
+          if (t && !isNaN(t) && (!orderCreatedAt || t < orderCreatedAt)) {
+            orderCreatedAt = t;
+          }
+        }
+      }
+    }
+
+    // 2. Filter out stale recycled AWB checkpoints from prior lifecycles.
+    // Checkpoints occurring significantly before the current consignment booking belong to an earlier shipment on a reused AWB.
+    const currentStatuses = rawStatuses.filter((s) => {
+      const t = Number(s.statusTimestamp || (s.createdAt ? new Date(s.createdAt).getTime() : 0));
+      if (!t || isNaN(t)) return false;
+      if (orderCreatedAt && !isNaN(orderCreatedAt)) {
+        // Allow up to 2 hours leeway for clock skew before booking
+        if (t < orderCreatedAt - 2 * 3600 * 1000) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const activeStatuses = currentStatuses.length > 0 ? currentStatuses : rawStatuses;
+
     // Sort descending by timestamp (newest first)
-    const sortedStatuses = [...rawStatuses].sort((a, b) => {
+    const sortedStatuses = [...activeStatuses].sort((a, b) => {
       const ta = Number(a.statusTimestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0));
       const tb = Number(b.statusTimestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0));
       return tb - ta;

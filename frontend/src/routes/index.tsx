@@ -233,11 +233,9 @@ function Dashboard() {
       if (l.status === "Delivered") {
         delivered++;
         const pickupMs = l.pickup_at ? new Date(l.pickup_at).getTime() : null;
-        const createdMs = l.created_at ? new Date(l.created_at).getTime() : null;
         const deliveredMs = l.delivered_at ? new Date(l.delivered_at).getTime() : null;
-        const start = pickupMs || createdMs;
-        if (start && deliveredMs && deliveredMs >= start) {
-          allTatMs.push(deliveredMs - start);
+        if (pickupMs && deliveredMs && deliveredMs >= pickupMs) {
+          allTatMs.push(deliveredMs - pickupMs);
         }
       } else if (l.status === "RTO" || isLabelRtoReturned(l)) {
         rto++;

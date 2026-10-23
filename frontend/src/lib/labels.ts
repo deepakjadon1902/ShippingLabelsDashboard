@@ -351,7 +351,8 @@ export function getDetailedTatMetrics(label: Label): DetailedTatMetrics {
 
   return {
     pickupToDeliveredMs,
-    pickupToDeliveredDisplay: pickupToDeliveredDisplay || label.tat_display || null,
+    pickupToDeliveredDisplay:
+      pickupToDeliveredDisplay || (pickupTime ? label.tat_display || null : null),
     dispatchedToDeliveredMs,
     dispatchedToDeliveredDisplay,
     pickupToRtoReturnedMs,

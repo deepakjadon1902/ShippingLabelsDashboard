@@ -20,6 +20,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -38,6 +39,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import {
   Select,
@@ -53,6 +58,7 @@ import {
   getOperationalStage,
   isLabelDelayed,
   formatDateTime,
+  formatCompactDuration,
   STATUSES,
   type Label,
   type LabelStatus,
@@ -332,24 +338,28 @@ export function ShipmentTable({
                   </TableCell>
 
                   {/* 7. TAT */}
-                  <TableCell className="py-3">
-                    {label.tat_display ? (
-                      <span className="font-medium text-foreground bg-muted/70 px-1.5 py-0.5 rounded text-[11px]">
+                  <TableCell className="py-2.5 px-3">
+                    {label.tat_hours != null && !isNaN(label.tat_hours) ? (
+                      <span className="font-mono font-bold text-foreground bg-muted/80 px-1.5 py-0.5 rounded text-[11px]">
+                        {formatCompactDuration(label.tat_hours * 3600 * 1000)}
+                      </span>
+                    ) : label.tat_display ? (
+                      <span className="font-medium text-foreground bg-muted/80 px-1.5 py-0.5 rounded text-[11px]">
                         {label.tat_display}
                       </span>
                     ) : label.pickup_at && label.status !== "Delivered" ? (
-                      <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
+                      <span className="text-[11px] text-sky-600 dark:text-sky-400 font-semibold">
                         In Transit
                       </span>
                     ) : (
-                      <span className="text-muted-foreground text-[11px]">--</span>
+                      <span className="text-muted-foreground/60 text-[11px]">—</span>
                     )}
                   </TableCell>
 
                   {/* 8. Last Sync */}
-                  <TableCell className="py-3">
+                  <TableCell className="py-2.5 px-3">
                     <div>
-                      <span className="text-muted-foreground text-[11px]">
+                      <span className="text-muted-foreground text-[11px] font-medium font-tabular">
                         {formatRelativeTime(label.last_tracking_update)}
                       </span>
                       {label.api_status_conflict && (
@@ -376,13 +386,13 @@ export function ShipmentTable({
                   </TableCell>
 
                   {/* 9. Actions */}
-                  <TableCell className="text-right py-3">
+                  <TableCell className="text-right py-2.5 px-3">
                     <div className="flex justify-end items-center gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        title="Inspect full road journey and checkpoints"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-muted"
+                        title="View shipment road journey and checkpoints"
                         onClick={() => onOpenJourney(label.id)}
                       >
                         <Eye className="h-3.5 w-3.5" />
@@ -391,8 +401,8 @@ export function ShipmentTable({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        title="Refresh real-time tracking"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-muted"
+                        title="Live tracking sync"
                         onClick={() => onRefresh(label.id)}
                         disabled={isRefreshing}
                       >
@@ -403,46 +413,60 @@ export function ShipmentTable({
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs font-medium">
-                            Status
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-muted"
+                            title="More actions"
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {STATUSES.map((s) => (
-                            <DropdownMenuItem key={s} onClick={() => onStatusChange(label.id, s)}>
-                              Mark as {s}
-                            </DropdownMenuItem>
-                          ))}
+                        <DropdownMenuContent align="end" className="w-48 text-xs bg-popover border-border shadow-md">
+                          <DropdownMenuItem onClick={() => onOpenJourney(label.id)} className="gap-2 cursor-pointer">
+                            <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                            View Journey Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => copyToClipboard(label.tracking_id, "AWB")} className="gap-2 cursor-pointer">
+                            <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+                            Copy AWB Number
+                          </DropdownMenuItem>
+                          <DropdownMenuItem asChild className="gap-2 cursor-pointer">
+                            <Link to="/edit/$id" params={{ id: label.id }}>
+                              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                              Edit Consignment
+                            </Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem asChild className="gap-2 cursor-pointer">
+                            <Link to="/print" search={{ ids: label.id }}>
+                              <Printer className="h-3.5 w-3.5 text-muted-foreground" />
+                              Print Shipping Label
+                            </Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger className="gap-2 cursor-pointer">
+                              <Truck className="h-3.5 w-3.5 text-muted-foreground" />
+                              Update Status
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent className="text-xs bg-popover border-border">
+                              {STATUSES.map((s) => (
+                                <DropdownMenuItem key={s} onClick={() => onStatusChange(label.id, s)} className="cursor-pointer">
+                                  Mark as {s}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => onDelete(label.id)}
+                            className="gap-2 text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            Delete Consignment
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-
-                      <Button asChild variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Edit">
-                        <Link to="/edit/$id" params={{ id: label.id }}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Link>
-                      </Button>
-
-                      <Button
-                        asChild
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                        title="Print label"
-                      >
-                        <Link to="/print" search={{ ids: label.id }}>
-                          <Printer className="h-3.5 w-3.5" />
-                        </Link>
-                      </Button>
-
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                        title="Delete"
-                        onClick={() => onDelete(label.id)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

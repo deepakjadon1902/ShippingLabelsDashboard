@@ -208,6 +208,24 @@ export function formatDuration(diffMs: number | null | undefined): string | null
 }
 
 /**
+ * Returns a compact, non-wrapping duration such as "4d 18h", "6h 25m", or "15m".
+ */
+export function formatCompactDuration(diffMs: number | null | undefined): string | null {
+  if (diffMs == null || isNaN(diffMs) || diffMs < 0) return null;
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+  if (hours > 0) {
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return `${Math.max(1, mins)}m`;
+}
+
+/**
  * Returns YYYY-MM-DD in the user's local timezone to prevent UTC day-shift inaccuracies.
  */
 export function getLocalDateKey(dateStrOrDate?: string | Date | null): string {

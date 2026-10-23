@@ -21,6 +21,12 @@ import {
   CheckCheck,
   ShieldCheck,
   Activity,
+  ArrowRight,
+  Radio,
+  Layers,
+  MapPin,
+  ExternalLink,
+  ChevronRight,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -64,6 +70,7 @@ import {
   isLabelRtoReturned,
   getOperationalStage,
   formatDuration,
+  formatCompactDuration,
   getLocalDateKey,
   type Label,
   type LabelStatus,
@@ -261,7 +268,7 @@ function Dashboard() {
       deliveredToday,
       ofdToday,
       completionRate,
-      avgTatDisplay: formatDuration(avgTatMs) || "Not available",
+      avgTatDisplay: formatCompactDuration(avgTatMs) || "—",
       sampleSize: allTatMs.length,
     };
   }, [labels, dateRange, customStart, customEnd]);
@@ -382,27 +389,40 @@ function Dashboard() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
-      {/* Top Header & Action Controls */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/60 pb-5">
+      {/* 1. Compact Control Tower Page Header & Consolidated Action Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/70 pb-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-foreground flex items-center gap-2.5">
-            <Activity className="h-6 w-6 text-primary shrink-0" />
-            Delivery Operations Command Center
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Real-time parcel logistics, carrier dispatch monitoring, and TAT turnaround analytics.
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-foreground">
+              Logistics Control Tower
+            </h1>
+            <Badge variant="outline" className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-muted/60 text-muted-foreground border-border/80">
+              Live Operations
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-2 flex-wrap font-medium">
+            <span>{labels.length} active consignments</span>
+            <span>•</span>
+            <span>Filter window: <strong className="text-foreground uppercase">{dateRange}</strong></span>
+            {refreshAllMutation.isPending && (
+              <span className="inline-flex items-center gap-1 text-primary animate-pulse font-semibold">
+                <RefreshCw className="h-3 w-3 animate-spin" /> Live syncing eligible carriers...
+              </span>
+            )}
           </p>
         </div>
 
+        {/* Consolidated Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Date range filter */}
+          {/* Date Range Selector */}
           <Select value={dateRange} onValueChange={(val) => setRange(val as DateRange)}>
-            <SelectTrigger className="w-[140px] text-xs h-9 bg-card">
+            <SelectTrigger className="w-[130px] text-xs h-9 bg-card border-border/80 shadow-xs font-medium">
               <CalendarDays className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
               <SelectValue placeholder="Date range" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Dates</SelectItem>
+            <SelectContent className="text-xs">
+              <SelectItem value="all">All-Time</SelectItem>
               <SelectItem value="today">Today</SelectItem>
               <SelectItem value="yesterday">Yesterday</SelectItem>
               <SelectItem value="last7">Last 7 Days</SelectItem>
@@ -410,97 +430,135 @@ function Dashboard() {
             </SelectContent>
           </Select>
 
-          {/* Bulk sync button */}
+          {/* Manual Courier Sync */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => setConfirmBulkSync(true)}
-            className="text-xs h-9 gap-1.5 bg-card"
+            className="text-xs h-9 gap-1.5 bg-card border-border/80 shadow-xs hover:bg-muted"
             disabled={refreshAllMutation.isPending}
+            title="Query real-time tracking for in-transit parcels respecting quota budgets"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshAllMutation.isPending ? "animate-spin text-primary" : ""}`} />
-            <span className="hidden sm:inline">Bulk Courier Sync</span>
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshAllMutation.isPending ? "animate-spin text-primary" : "text-muted-foreground"}`} />
+            <span className="hidden sm:inline">Sync Eligible</span>
           </Button>
 
-          {/* Print button */}
-          <Button asChild variant="outline" size="sm" className="text-xs h-9 gap-1.5 bg-card">
+          {/* Print Labels Button */}
+          <Button asChild variant="outline" size="sm" className="text-xs h-9 gap-1.5 bg-card border-border/80 shadow-xs hover:bg-muted">
             <Link to="/print">
-              <Printer className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Print Labels</span>
+              <Printer className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="hidden sm:inline">Print Grid</span>
             </Link>
           </Button>
 
-          {/* Create Label button */}
-          <Button asChild size="sm" className="text-xs h-9 gap-1.5 font-semibold">
+          {/* Primary Create Label Button with Restrained Orange */}
+          <Button asChild size="sm" className="text-xs h-9 gap-1.5 font-bold bg-orange-600 hover:bg-orange-700 text-white shadow-xs">
             <Link to="/create">
               <PlusCircle className="h-3.5 w-3.5" />
-              Create Label
+              New Consignment
             </Link>
           </Button>
         </div>
       </div>
 
+      {/* 2. Simplified Secondary View Switcher (Clean, Single Strip) */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-border/60">
+        <Button
+          variant={activeTab === "overview" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setTab("overview")}
+          className={`h-8 px-3 text-xs font-semibold ${activeTab === "overview" ? "bg-card shadow-xs text-foreground border border-border/70" : "text-muted-foreground"}`}
+        >
+          Overview & Telemetry
+        </Button>
+        <Button
+          variant={activeTab === "shipments" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setTab("shipments")}
+          className={`h-8 px-3 text-xs font-semibold gap-1.5 ${activeTab === "shipments" ? "bg-card shadow-xs text-foreground border border-border/70" : "text-muted-foreground"}`}
+        >
+          Shipments Table
+          <span className="text-[10px] font-bold font-tabular px-1.5 py-0.2 rounded-full bg-muted">
+            {labels.length}
+          </span>
+        </Button>
+        <Button
+          variant={activeTab === "today" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setTab("today")}
+          className={`h-8 px-3 text-xs font-semibold gap-1.5 ${activeTab === "today" ? "bg-card shadow-xs text-foreground border border-border/70" : "text-muted-foreground"}`}
+        >
+          Today's Activity
+          {kpis.createdToday + kpis.deliveredToday > 0 && (
+            <span className="text-[10px] font-bold font-tabular px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+              {kpis.createdToday + kpis.deliveredToday}
+            </span>
+          )}
+        </Button>
+        {kpis.delayed > 0 && (
+          <Button
+            variant={activeTab === "delayed" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setTab("delayed")}
+            className={`h-8 px-2.5 text-xs font-semibold gap-1.5 ${
+              activeTab === "delayed"
+                ? "bg-amber-100 text-amber-950 dark:bg-amber-950 dark:text-amber-200 border border-amber-300"
+                : "text-amber-800 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+            }`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+            Delayed SLA ({kpis.delayed})
+          </Button>
+        )}
+        {kpis.rto > 0 && (
+          <Button
+            variant={activeTab === "rto" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setTab("rto")}
+            className={`h-8 px-2.5 text-xs font-semibold gap-1.5 ${
+              activeTab === "rto"
+                ? "bg-rose-100 text-rose-950 dark:bg-rose-950 dark:text-rose-200 border border-rose-300"
+                : "text-rose-800 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+            }`}
+          >
+            <RotateCcw className="h-3.5 w-3.5 text-rose-600" />
+            RTO Exceptions ({kpis.rto})
+          </Button>
+        )}
+        <Button
+          variant={activeTab === "reports" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setTab("reports")}
+          className={`h-8 px-3 text-xs font-semibold ${activeTab === "reports" ? "bg-card shadow-xs text-foreground border border-border/70" : "text-muted-foreground"}`}
+        >
+          Daily Audit & Reports
+        </Button>
+      </div>
+
       {/* Main Tabs Navigation */}
       <Tabs value={activeTab} onValueChange={(val) => setTab(val as DashboardTab)} className="space-y-6">
-        <TabsList className="bg-muted/60 p-1 rounded-xl h-auto flex flex-wrap gap-1 border border-border/50">
-          <TabsTrigger value="overview" className="text-xs py-2 px-3 data-[state=active]:bg-card data-[state=active]:shadow-xs">
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="shipments" className="text-xs py-2 px-3 data-[state=active]:bg-card data-[state=active]:shadow-xs gap-1.5">
-            Shipments & Tracking
-            <span className="text-[10px] font-semibold font-tabular px-1.5 py-0.2 rounded-full bg-muted">
-              {labels.length}
-            </span>
-          </TabsTrigger>
-          <TabsTrigger value="today" className="text-xs py-2 px-3 data-[state=active]:bg-card data-[state=active]:shadow-xs gap-1.5">
-            Today's Activity
-            {kpis.createdToday + kpis.deliveredToday > 0 && (
-              <span className="text-[10px] font-semibold font-tabular px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
-                {kpis.createdToday + kpis.deliveredToday}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="delayed" className="text-xs py-2 px-3 data-[state=active]:bg-card data-[state=active]:shadow-xs gap-1.5">
-            Delayed
-            {kpis.delayed > 0 && (
-              <span className="text-[10px] font-semibold font-tabular px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300">
-                {kpis.delayed}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="rto" className="text-xs py-2 px-3 data-[state=active]:bg-card data-[state=active]:shadow-xs gap-1.5">
-            RTO Actions
-            {kpis.rto > 0 && (
-              <span className="text-[10px] font-semibold font-tabular px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-300">
-                {kpis.rto}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="reports" className="text-xs py-2 px-3 data-[state=active]:bg-card data-[state=active]:shadow-xs">
-            Reports & Analytics
-          </TabsTrigger>
-        </TabsList>
-
         {/* -------------------- TAB 1: OVERVIEW -------------------- */}
         <TabsContent value="overview" className="space-y-6">
-          {/* KPI Cards Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+          {/* KPI Cards Grid — 5 Compact, Balanced Columns with Semantic Border Accents */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
             <KpiCard
-              title="Total Shipments"
+              title="Total Consignments"
               value={kpis.total}
-              sub={`${kpis.createdToday} created today`}
+              sub={`${kpis.createdToday} dispatched today`}
               icon={Package}
-              badge={dateRange !== "all" ? dateRange : undefined}
-              badgeVariant="blue"
+              badge={dateRange !== "all" ? dateRange : "All-time"}
+              badgeVariant="slate"
+              accentColor="slate"
               onClick={() => setTab("shipments")}
             />
             <KpiCard
-              title="Delivered"
+              title="Delivered Successfully"
               value={kpis.delivered}
               sub={`${kpis.completionRate}% completion rate`}
               icon={CheckCircle2}
-              badge={kpis.deliveredToday > 0 ? `+${kpis.deliveredToday} today` : "Completed"}
+              badge={kpis.deliveredToday > 0 ? `+${kpis.deliveredToday} today` : `${kpis.completionRate}% rate`}
               badgeVariant="emerald"
+              accentColor="emerald"
               iconColor="text-emerald-600 dark:text-emerald-400"
               iconBg="bg-emerald-500/10"
               onClick={() => {
@@ -511,12 +569,13 @@ function Dashboard() {
             <KpiCard
               title="In Active Transit"
               value={kpis.shipped}
-              sub={`${kpis.outForDelivery} out for delivery`}
+              sub={`${kpis.outForDelivery} final mile (OFD)`}
               icon={Truck}
-              badge={kpis.outForDelivery > 0 ? `${kpis.outForDelivery} OFD` : "In Transit"}
+              badge={kpis.outForDelivery > 0 ? `${kpis.outForDelivery} OFD` : "Moving"}
               badgeVariant="blue"
-              iconColor="text-blue-600 dark:text-blue-400"
-              iconBg="bg-blue-500/10"
+              accentColor="blue"
+              iconColor="text-sky-600 dark:text-sky-400"
+              iconBg="bg-sky-500/10"
               onClick={() => {
                 setStatusFilter("Shipped");
                 setTab("shipments");
@@ -525,35 +584,197 @@ function Dashboard() {
             <KpiCard
               title="Delayed Past SLA"
               value={kpis.delayed}
-              sub="Breached SLA window"
+              sub="Carrier SLA missed"
               icon={AlertTriangle}
-              badge={kpis.delayed > 0 ? "Action needed" : "On Schedule"}
+              badge={kpis.delayed > 0 ? "Action Required" : "On Schedule"}
               badgeVariant={kpis.delayed > 0 ? "amber" : "emerald"}
+              accentColor="amber"
               iconColor={kpis.delayed > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}
               iconBg={kpis.delayed > 0 ? "bg-amber-500/10" : "bg-muted"}
               onClick={() => setTab("delayed")}
             />
             <KpiCard
-              title="RTO Returned"
-              value={kpis.rto}
-              sub={`${kpis.rtoReturned} returned, ${kpis.rtoInitiated} in motion`}
-              icon={RotateCcw}
-              badge={kpis.rto > 0 ? `${kpis.rto} RTO` : "Zero returns"}
-              badgeVariant={kpis.rto > 0 ? "rose" : "slate"}
-              iconColor={kpis.rto > 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}
-              iconBg={kpis.rto > 0 ? "bg-rose-500/10" : "bg-muted"}
-              onClick={() => setTab("rto")}
-            />
-            <KpiCard
-              title="Average Delivery TAT"
+              title="Average Turnaround"
               value={kpis.avgTatDisplay}
-              sub={`Sample: ${kpis.sampleSize} parcels`}
+              sub="Dispatch to Delivery"
               icon={Timer}
-              badge="Pickup ➔ Deliv"
-              badgeVariant="purple"
-              iconColor="text-primary"
-              iconBg="bg-primary/10"
+              badge={`${kpis.sampleSize} parcels`}
+              badgeVariant="orange"
+              accentColor="orange"
+              iconColor="text-orange-600 dark:text-orange-400"
+              iconBg="bg-orange-500/10"
             />
+          </div>
+
+          {/* Operational Pulse Secondary Metric Strip */}
+          <div className="flex items-center gap-2 overflow-x-auto p-2.5 rounded-lg bg-card border border-border/80 shadow-2xs text-xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-2 flex items-center gap-1.5 shrink-0">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Operational Pulse:
+            </span>
+            <div className="flex items-center gap-4 text-xs shrink-0">
+              <span className="text-muted-foreground">
+                Today Dispatched: <strong className="text-foreground font-tabular">{kpis.createdToday}</strong>
+              </span>
+              <span className="text-muted-foreground">
+                Today Delivered: <strong className="text-emerald-700 dark:text-emerald-400 font-tabular">{kpis.deliveredToday}</strong>
+              </span>
+              <span className="text-muted-foreground">
+                Final Mile (OFD): <strong className="text-indigo-600 dark:text-indigo-400 font-tabular">{kpis.outForDelivery}</strong>
+              </span>
+              <span className="text-muted-foreground">
+                Attempted / NDR: <strong className="text-amber-600 dark:text-amber-400 font-tabular">{kpis.failedAttempts}</strong>
+              </span>
+              <span className="text-muted-foreground">
+                RTO Returned: <strong className="text-rose-600 dark:text-rose-400 font-tabular">{kpis.rtoReturned}</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Actionable Exception Prioritization Panels */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Panel 1: Delayed SLA Breaches */}
+            <Card className="border-border/80 shadow-xs bg-card border-l-4 border-l-amber-500 flex flex-col justify-between">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                      <AlertTriangle className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-sm font-bold text-foreground">Delayed Shipments</CardTitle>
+                      <CardDescription className="text-[11px]">SLA breaches requiring carrier escalation</CardDescription>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className={`text-xs font-bold font-tabular ${delayedLabels.length > 0 ? "bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950 dark:text-amber-300" : "bg-muted"}`}>
+                    {delayedLabels.length} Breached
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4 pt-2 flex-1">
+                {delayedLabels.length === 0 ? (
+                  <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400 py-3 font-medium">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    All active consignments are moving within SLA delivery windows.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {delayedLabels.slice(0, 3).map((l) => (
+                      <div key={l.id} className="p-2 rounded-md bg-muted/40 hover:bg-muted/70 transition-colors flex items-center justify-between text-xs">
+                        <div className="min-w-0">
+                          <div className="font-mono font-bold text-foreground truncate">{l.tracking_id}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">{l.courier_name} • {l.receiver_city}, {l.receiver_state}</div>
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 rounded font-tabular">
+                            +{l.delayed_days || 1}d SLA
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+              <div className="p-3 pt-0 border-t border-border/40 mt-auto">
+                <Button variant="ghost" size="sm" onClick={() => setTab("delayed")} className="w-full text-xs h-7 text-amber-800 dark:text-amber-300 hover:text-amber-900 justify-between font-semibold">
+                  <span>View all {delayedLabels.length} delayed shipments</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </Card>
+
+            {/* Panel 2: Tracking Telemetry & Error Gateway */}
+            <Card className="border-border/80 shadow-xs bg-card border-l-4 border-l-sky-500 flex flex-col justify-between">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-md bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                      <Radio className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-sm font-bold text-foreground">Tracking Telemetry</CardTitle>
+                      <CardDescription className="text-[11px]">Carrier gateway status & quotas</CardDescription>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="text-xs font-bold text-emerald-800 bg-emerald-50 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300">
+                    Active
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4 pt-2 flex-1 space-y-2 text-xs">
+                <div className="flex items-center justify-between py-1 border-b border-border/40">
+                  <span className="text-muted-foreground">Direct Carrier Integrations</span>
+                  <span className="font-semibold text-foreground flex items-center gap-1">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> Delhivery, Ekart, Maruti, Shadowfax
+                  </span>
+                </div>
+                <div className="flex items-center justify-between py-1 border-b border-border/40">
+                  <span className="text-muted-foreground">TrackCourier Cascade</span>
+                  <span className="font-semibold text-foreground">3 Accounts Armed (Failover Ready)</span>
+                </div>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-muted-foreground">DTDC Upstream API</span>
+                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">
+                    Direct 401 ➔ Failover to Acc 2/3
+                  </span>
+                </div>
+              </CardContent>
+              <div className="p-3 pt-0 border-t border-border/40 mt-auto">
+                <Button variant="ghost" size="sm" onClick={() => setConfirmBulkSync(true)} className="w-full text-xs h-7 text-sky-800 dark:text-sky-300 hover:text-sky-900 justify-between font-semibold">
+                  <span>Sync eligible in-transit tracking</span>
+                  <RefreshCw className="h-3 w-3" />
+                </Button>
+              </div>
+            </Card>
+
+            {/* Panel 3: RTO & Return Actions */}
+            <Card className="border-border/80 shadow-xs bg-card border-l-4 border-l-rose-500 flex flex-col justify-between">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-md bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                      <RotateCcw className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-sm font-bold text-foreground">RTO Exception Hub</CardTitle>
+                      <CardDescription className="text-[11px]">Returns in transit and warehouse restocks</CardDescription>
+                    </div>
+                  </div>
+                  <Badge variant="outline" className={`text-xs font-bold font-tabular ${rtoLabels.length > 0 ? "bg-rose-100 text-rose-950 border-rose-300 dark:bg-rose-950 dark:text-rose-300" : "bg-muted"}`}>
+                    {rtoLabels.length} In Return
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4 pt-2 flex-1">
+                {rtoLabels.length === 0 ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    Zero undelivered or return-initiated consignments.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {rtoLabels.slice(0, 3).map((l) => (
+                      <div key={l.id} className="p-2 rounded-md bg-muted/40 hover:bg-muted/70 transition-colors flex items-center justify-between text-xs">
+                        <div className="min-w-0">
+                          <div className="font-mono font-bold text-foreground truncate">{l.tracking_id}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">{l.courier_name} • {l.receiver_city}</div>
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <span className="text-[10px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950 px-1.5 py-0.5 rounded">
+                            {l.rto_status === "RTO Delivered / Returned" ? "Restocked" : "In Return"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+              <div className="p-3 pt-0 border-t border-border/40 mt-auto">
+                <Button variant="ghost" size="sm" onClick={() => setTab("rto")} className="w-full text-xs h-7 text-rose-800 dark:text-rose-300 hover:text-rose-900 justify-between font-semibold">
+                  <span>View full RTO management pipeline</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </Card>
           </div>
 
           {/* Analytics Summary */}

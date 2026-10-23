@@ -4,6 +4,13 @@ import type { Label } from "@/lib/labels";
 import { getQrPayload } from "@/lib/labels";
 import { useWebsiteName } from "@/lib/settings";
 
+export const DEFAULT_SENDER_NAME = "BrajMart";
+export const DEFAULT_SENDER_ADDRESS =
+  "Keshav Kunj, Near ISKCON, Raman Reti\nVrindavan, UP - 281121, India";
+export const DEFAULT_SENDER_PHONE = "+91 9634359003";
+export const DEFAULT_SENDER_WEBSITE = "Brajmart.com";
+export const DEFAULT_SENDER_REVIEW_URL = "https://g.page/r/CcB_tRBxPC-NEBM/review";
+
 interface Props {
   label: Label;
   size?: "compact" | "full" | "mini" | "half";
@@ -32,13 +39,11 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
         ? "print-label text-black bg-white text-[10px] leading-tight p-2"
         : "print-label text-black bg-white text-[11.5px] leading-tight p-2.5";
 
-  const hasSender = !!(
-    label.sender_name ||
-    label.sender_address ||
-    label.sender_phone ||
-    label.sender_website
-  );
-  const hasReviewQr = !!(label.sender_review_url && label.sender_review_url.trim());
+  const senderName = label.sender_name?.trim() || DEFAULT_SENDER_NAME;
+  const senderAddress = label.sender_address?.trim() || DEFAULT_SENDER_ADDRESS;
+  const senderPhone = label.sender_phone?.trim() || DEFAULT_SENDER_PHONE;
+  const senderWebsite = label.sender_website?.trim() || DEFAULT_SENDER_WEBSITE;
+  const senderReviewUrl = label.sender_review_url?.trim() || DEFAULT_SENDER_REVIEW_URL;
 
   const fromLabelSize = isFull
     ? "text-sm"
@@ -218,63 +223,63 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
         ) : null}
       </div>
 
-      {hasSender || hasReviewQr ? (
-        <div
-          className={
-            "flex items-start justify-between " + (isMini ? "gap-2" : isFull ? "gap-4" : "gap-3")
-          }
-        >
-          <div className="flex-1 min-w-0">
-            <div
-              className={`font-semibold tracking-[0.2em] uppercase text-black/60 ${fromLabelSize}`}
-            >
-              From
-            </div>
-            {label.sender_name ? (
-              <div className={`font-bold leading-snug ${fromNameSize}`}>{label.sender_name}</div>
-            ) : null}
-            {label.sender_address ? (
-              <div
-                className={`leading-snug text-black/85 break-words whitespace-pre-line ${fromBodySize}`}
-              >
-                {label.sender_address}
-              </div>
-            ) : null}
-            {label.sender_phone ? (
-              <div className={`leading-snug ${fromBodySize}`}>
-                <span className="text-black/60 font-semibold">Phone: </span>
-                <span className="font-semibold">{label.sender_phone}</span>
-              </div>
-            ) : null}
-            {label.sender_website ? (
-              <div className={`leading-snug ${fromBodySize}`}>
-                <span className="text-black/60 font-semibold">Web: </span>
-                <span className="font-semibold">{label.sender_website}</span>
-              </div>
-            ) : null}
-            <div className={`italic text-black/70 mt-0.5 ${returnNoteSize}`}>
-              If undelivered, please return to above address.
-            </div>
+      {/* FROM / Sender Section (Always visible with BrajMart defaults) */}
+      <div
+        className={
+          "flex items-start justify-between " + (isMini ? "gap-2" : isFull ? "gap-4" : "gap-3")
+        }
+      >
+        <div className="flex-1 min-w-0">
+          <div
+            className={`font-semibold tracking-[0.2em] uppercase text-black/60 ${fromLabelSize}`}
+          >
+            From
           </div>
-
-          {hasReviewQr ? (
-            <div className="flex flex-col items-center shrink-0">
-              <div className={`bg-white border border-black ${isMini ? "p-0.5" : "p-1"}`}>
-                <QRCodeSVG
-                  value={label.sender_review_url!.trim()}
-                  size={reviewQrSize}
-                  level="M"
-                  includeMargin={false}
-                />
-              </div>
-              <div className={`text-center mt-0.5 font-medium text-black/80 ${reviewCaptionSize}`}>
-                Scan QR for Review
-              </div>
+          {senderName ? (
+            <div className={`font-bold leading-snug ${fromNameSize}`}>{senderName}</div>
+          ) : null}
+          {senderAddress ? (
+            <div
+              className={`leading-snug text-black/85 break-words whitespace-pre-line ${fromBodySize}`}
+            >
+              {senderAddress}
             </div>
           ) : null}
+          {senderPhone ? (
+            <div className={`leading-snug ${fromBodySize}`}>
+              <span className="text-black/60 font-semibold">Phone: </span>
+              <span className="font-semibold">{senderPhone}</span>
+            </div>
+          ) : null}
+          {senderWebsite ? (
+            <div className={`leading-snug ${fromBodySize}`}>
+              <span className="text-black/60 font-semibold">Web: </span>
+              <span className="font-semibold">{senderWebsite}</span>
+            </div>
+          ) : null}
+          <div className={`italic text-black/70 mt-0.5 ${returnNoteSize}`}>
+            If undelivered, please return to above address.
+          </div>
         </div>
-      ) : null}
 
+        {senderReviewUrl ? (
+          <div className="flex flex-col items-center shrink-0">
+            <div className={`bg-white border border-black ${isMini ? "p-0.5" : "p-1"}`}>
+              <QRCodeSVG
+                value={senderReviewUrl}
+                size={reviewQrSize}
+                level="M"
+                includeMargin={false}
+              />
+            </div>
+            <div className={`text-center mt-0.5 font-medium text-black/80 ${reviewCaptionSize}`}>
+              Scan QR for Review
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Footer & Support Notice */}
       {websiteName ? (
         <div
           className={
@@ -291,6 +296,25 @@ export function ShippingLabel({ label, size = "compact" }: Props) {
           Thank you for your order - <span className="font-semibold text-black">{websiteName}</span>
         </div>
       ) : null}
+      <div
+        className={
+          "text-center text-black/75 font-normal " +
+          (isFull
+            ? "mt-1 text-[8.5px] leading-snug tracking-tight"
+            : isHalf
+              ? "mt-0.5 text-[7px] leading-snug tracking-tight"
+              : isMini
+                ? "mt-0.5 text-[5.5px] leading-tight"
+                : "mt-0.5 text-[6.5px] leading-snug tracking-tight")
+        }
+      >
+        <div>
+          Please reach out to our support team with a proper unboxing video in case of any complaints / issues.
+        </div>
+        <div>
+          For order-related issues, write to support@brajmart.com or call 9634359003.
+        </div>
+      </div>
     </div>
   );
 }

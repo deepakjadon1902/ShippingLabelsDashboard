@@ -49,11 +49,11 @@ export type SenderProfileInput = Omit<SenderProfile, "id">;
 export const DEFAULT_SENDERS: SenderProfile[] = [
   {
     id: "default-1",
-    name: "Shri Radha Govind Store",
-    address: "",
-    phone: "",
-    website: "shriradhagovindstore.com",
-    review_url: "",
+    name: "BrajMart",
+    address: "Keshav Kunj, Near ISKCON, Raman Reti\nVrindavan, UP - 281121, India",
+    phone: "+91 9634359003",
+    website: "Brajmart.com",
+    review_url: "https://g.page/r/CcB_tRBxPC-NEBM/review",
     sort_order: 0,
   },
   {

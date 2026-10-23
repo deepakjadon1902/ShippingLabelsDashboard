@@ -207,6 +207,19 @@ export function formatDuration(diffMs: number | null | undefined): string | null
   return parts.join(" ");
 }
 
+/**
+ * Returns YYYY-MM-DD in the user's local timezone to prevent UTC day-shift inaccuracies.
+ */
+export function getLocalDateKey(dateStrOrDate?: string | Date | null): string {
+  if (!dateStrOrDate) return "";
+  const d = typeof dateStrOrDate === "string" ? new Date(dateStrOrDate) : dateStrOrDate;
+  if (isNaN(d.getTime())) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function formatDateTime(dateStr?: string | null): string {
   if (!dateStr) return "Not available from courier";
   try {

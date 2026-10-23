@@ -464,7 +464,10 @@ export function applyTrackingResultToLabel(label, trackingResult) {
         }
       }
     }
-    label.delivered_at = deliveryDateFound || (trackingResult.eventDate ? new Date(trackingResult.eventDate) : now);
+    const candidateDate = deliveryDateFound || (trackingResult.eventDate ? new Date(trackingResult.eventDate) : null);
+    if (candidateDate && !isNaN(candidateDate.getTime())) {
+      label.delivered_at = candidateDate;
+    }
   }
 
   // Calculate TAT (Turnaround Time)

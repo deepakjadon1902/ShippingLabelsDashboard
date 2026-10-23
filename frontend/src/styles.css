@@ -39,6 +39,7 @@
 }
 
 :root {
+  color-scheme: light dark;
   --radius: 0.5rem;
   /* Warm cream background */
   --background: oklch(0.985 0.008 85);
@@ -80,6 +81,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.18 0.015 60);
   --foreground: oklch(0.97 0.005 85);
   --card: oklch(0.22 0.02 55);
@@ -243,3 +245,11 @@
   }
 }
 
+
+
+.table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  container-type: inline-size;
+  -webkit-overflow-scrolling: touch;
+}

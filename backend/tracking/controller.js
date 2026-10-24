@@ -257,6 +257,74 @@ export function recordShipmentQuery(providerKey, awb) {
   shipmentLastRequestMap.set(key, Date.now());
 }
 
+// In-flight active reservations to prevent concurrent overshooting of daily budgets
+const inFlightProviderDaily = new Map();
+let inFlightGlobalDaily = 0;
+
+export function getInFlightProviderDaily(providerKey) {
+  const p = getProviderKey(providerKey);
+  return inFlightProviderDaily.get(p) || 0;
+}
+
+export function getInFlightGlobalDaily() {
+  return inFlightGlobalDaily;
+}
+
+export function resetInFlightReservations() {
+  inFlightProviderDaily.clear();
+  inFlightGlobalDaily = 0;
+}
+
+/**
+ * Safe tracking diagnostics logger. Never logs credentials, tokens, or customer PII.
+ */
+export function logTrackingDiagnostic(level, message, meta = {}) {
+  const sanitized = {};
+  for (const [key, value] of Object.entries(meta)) {
+    const lk = key.toLowerCase();
+    if (
+      lk.includes("token") ||
+      lk.includes("secret") ||
+      lk.includes("key") ||
+      lk.includes("pass") ||
+      lk.includes("auth") ||
+      lk.includes("phone") ||
+      lk.includes("mobile") ||
+      lk.includes("address") ||
+      lk.includes("email") ||
+      lk.includes("name")
+    ) {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  if (process.env.NODE_ENV !== "test") {
+    console.log(`[TRACKING_DIAGNOSTIC] [${level.toUpperCase()}] ${message}`, JSON.stringify(sanitized));
+  }
+  return { level, message, meta: sanitized };
+}
+
+/**
+ * Queries total request counts across all providers from the request ledger for today and current month
+ */
+export async function getGlobalUsage() {
+  if (mongoose.connection.readyState !== 1) {
+    return { today: 0, month: 0 };
+  }
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  try {
+    const [todayCount, monthCount] = await Promise.all([
+      TrackingLedger.countDocuments({ timestamp: { $gte: startOfDay } }).maxTimeMS(2000),
+      TrackingLedger.countDocuments({ timestamp: { $gte: startOfMonth } }).maxTimeMS(2000),
+    ]);
+    return { today: todayCount, month: monthCount };
+  } catch (err) {
+    return { today: 0, month: 0 };
+  }
+}
+
 /**
  * Queries request counts from the request ledger for today and the current calendar month
  */
@@ -420,7 +488,7 @@ export async function getTrackingUsageStats() {
  * @param {Function} params.executeFn - Async function returning TrackingResult
  * @param {boolean} params.force - Force bypass cooldown if requested by user
  */
-export async function executeTrackRequest({
+export function executeTrackRequest({
   provider,
   courier,
   awb,
@@ -433,189 +501,290 @@ export async function executeTrackRequest({
   const cleanAwb = String(awb || "").trim();
   const dedupKey = `${providerKey}:${cleanAwb}`;
 
-  // 1. Global kill switch check
-  if (!cachedSettings.externalTrackingEnabled) {
-    return {
-      skipped: true,
-      reason: "External API tracking is globally disabled by administrator policy",
-      error: "External tracking disabled",
-      provider,
-      courier,
-      trackingNumber: cleanAwb,
-    };
-  }
-
-  // 2. Provider-specific switch check
-  const providerCfg = cachedSettings.providers?.[providerKey] || (providerKey === "trackcourier_account1" ? cachedSettings.providers?.trackcourier : null);
-  if (providerCfg && providerCfg.enabled === false) {
-    return {
-      skipped: true,
-      reason: `Provider "${provider}" is currently disabled by administrator policy`,
-      error: `Provider ${provider} disabled`,
-      provider,
-      courier,
-      trackingNumber: cleanAwb,
-    };
-  }
-
-  // 3. Circuit breaker check (e.g. 402 quota exhaustion, 429 rate limit)
-  if (isCircuitBreakerTripped(providerKey)) {
-    const cb = circuitBreakers[providerKey];
-    return {
-      skipped: true,
-      isCircuitBreakerActive: true,
-      reason: `Provider "${provider}" is temporarily paused by circuit breaker (${cb.reason})`,
-      error: `Provider ${provider} quota limit or rate limit active: ${cb.reason}`,
-      provider,
-      courier,
-      trackingNumber: cleanAwb,
-    };
-  }
-
-  // 4. Per-shipment cooldown check
-  if (!force) {
-    const cooldownMinutes = cooldownMs
-      ? Math.ceil(cooldownMs / 60000)
-      : cachedSettings.perShipmentCooldownMinutes;
-    const cooldown = checkShipmentCooldown(providerKey, cleanAwb, cooldownMinutes);
-    if (cooldown.isCoolingDown) {
-      return {
-        skipped: true,
-        cooldownActive: true,
-        remainingSeconds: cooldown.remainingSeconds,
-        reason: `Shipment cooldown active (${cooldown.remainingSeconds}s remaining). Wait before querying ${provider} again.`,
-        provider,
-        courier,
-        trackingNumber: cleanAwb,
-      };
-    }
-  }
-
-  // 5. Daily and Monthly budget check
-  if (providerCfg) {
-    const usage = await getProviderUsage(providerKey);
-    if (providerCfg.dailyBudget && usage.today >= providerCfg.dailyBudget) {
-      tripCircuitBreaker(providerKey, `Daily budget reached (${usage.today}/${providerCfg.dailyBudget})`);
-      return {
-        skipped: true,
-        reason: `Daily quota budget reached for ${provider} (${usage.today}/${providerCfg.dailyBudget})`,
-        error: `Daily budget exhausted for ${provider}`,
-        provider,
-        courier,
-        trackingNumber: cleanAwb,
-      };
-    }
-
-    if (providerCfg.monthlyBudget && usage.month >= providerCfg.monthlyBudget) {
-      tripCircuitBreaker(providerKey, `Monthly budget reached (${usage.month}/${providerCfg.monthlyBudget})`);
-      return {
-        skipped: true,
-        reason: `Monthly quota budget reached for ${provider} (${usage.month}/${providerCfg.monthlyBudget})`,
-        error: `Monthly budget exhausted for ${provider}`,
-        provider,
-        courier,
-        trackingNumber: cleanAwb,
-      };
-    }
-  }
-
-  // 6. Deduplication: if an identical request is already running, return the existing Promise
+  // Synchronous deduplication: if identical query is already running, return existing promise immediately
   if (inFlightRequests.has(dedupKey)) {
     return inFlightRequests.get(dedupKey);
   }
 
-  // 7. Concurrency Limiter & In-Flight Tracking
-  const maxConcurrent = cachedSettings.maxConcurrentRequests || 1;
-
   const requestPromise = (async () => {
-    await acquireConcurrencySlot(maxConcurrent);
-    const startTime = Date.now();
-    let result = null;
-    let statusCode = 200;
-    let errorMessage = null;
-    let isSuccess = false;
-
+    let hasReservedSlot = false;
     try {
-      result = await executeFn();
-
-      statusCode = result.statusCode || (result.error ? 500 : 200);
-      errorMessage = result.error || null;
-      isSuccess = !result.error && (!!result.status || !!result.rawStatus);
-
-      // Inspect for non-retryable errors
-      const isActualQuota =
-        result.isQuotaError ||
-        statusCode === 402 ||
-        (providerKey.startsWith("trackcourier") && (errorMessage?.includes("402") || errorMessage?.toLowerCase().includes("quota exceeded")));
-
-      if (isActualQuota) {
-        statusCode = 402;
-        tripCircuitBreaker(providerKey, "Quota exhausted (HTTP 402)");
-      } else if (result.isRateLimitError || statusCode === 429 || errorMessage?.includes("429") || errorMessage?.toLowerCase().includes("too many requests")) {
-        statusCode = 429;
-        // Trip rate limit breaker for 120 seconds
-        tripCircuitBreaker(providerKey, "Rate limit reached (HTTP 429)", 120 * 1000);
-      } else if (result.isAuthError || statusCode === 401 || statusCode === 403 || (providerKey === "dtdc" && errorMessage?.includes("401"))) {
-        tripCircuitBreaker(providerKey, `Authentication failed (HTTP ${statusCode === 403 ? 403 : 401})`);
+      // 1. Global kill switch check
+      if (!cachedSettings.externalTrackingEnabled) {
+        return {
+          skipped: true,
+          reason: "External API tracking is globally disabled by administrator policy",
+          error: "External tracking disabled",
+          provider,
+          courier,
+          trackingNumber: cleanAwb,
+        };
       }
 
-      // Record outcomes
-      const outcome = providerLastOutcomes[providerKey] || (providerLastOutcomes[providerKey] = {});
-      if (isSuccess) {
-        outcome.lastSuccess = new Date();
-      } else {
-        outcome.lastError = errorMessage;
-        outcome.lastErrorTime = new Date();
+      // 2. Provider-specific switch check
+      const providerCfg = cachedSettings.providers?.[providerKey] || (providerKey === "trackcourier_account1" ? cachedSettings.providers?.trackcourier : null);
+      if (providerCfg && providerCfg.enabled === false) {
+        return {
+          skipped: true,
+          reason: `Provider "${provider}" is currently disabled by administrator policy`,
+          error: `Provider ${provider} disabled`,
+          provider,
+          courier,
+          trackingNumber: cleanAwb,
+        };
       }
 
-      // Record shipment cooldown
-      recordShipmentQuery(providerKey, cleanAwb);
+      // 3. Circuit breaker check (e.g. 402 quota exhaustion, 429 rate limit)
+      if (isCircuitBreakerTripped(providerKey)) {
+        const cb = circuitBreakers[providerKey];
+        return {
+          skipped: true,
+          isCircuitBreakerActive: true,
+          reason: `Provider "${provider}" is temporarily paused by circuit breaker (${cb.reason})`,
+          error: `Provider ${provider} quota limit or rate limit active: ${cb.reason}`,
+          provider,
+          courier,
+          trackingNumber: cleanAwb,
+        };
+      }
 
-      return result;
-    } catch (err) {
-      errorMessage = err.message || "Unknown error during tracking execution";
-      statusCode = 500;
-      isSuccess = false;
+      // 4. Per-shipment cooldown check
+      if (!force) {
+        const cooldownMinutes = cooldownMs
+          ? Math.ceil(cooldownMs / 60000)
+          : cachedSettings.perShipmentCooldownMinutes;
+        const cooldown = checkShipmentCooldown(providerKey, cleanAwb, cooldownMinutes);
+        if (cooldown.isCoolingDown) {
+          return {
+            skipped: true,
+            cooldownActive: true,
+            remainingSeconds: cooldown.remainingSeconds,
+            reason: `Shipment cooldown active (${cooldown.remainingSeconds}s remaining). Wait before querying ${provider} again.`,
+            provider,
+            courier,
+            trackingNumber: cleanAwb,
+          };
+        }
+      }
 
-      const outcome = providerLastOutcomes[providerKey] || (providerLastOutcomes[providerKey] = {});
-      outcome.lastError = errorMessage;
-      outcome.lastErrorTime = new Date();
+      // 5. Global Daily and Monthly budget check (with in-flight reservation accounting)
+      const globalDailyBudget = cachedSettings.globalDailyBudget;
+      const globalMonthlyBudget = cachedSettings.globalMonthlyBudget;
+      if (globalDailyBudget || globalMonthlyBudget) {
+        const globalUsage = await getGlobalUsage();
+        const effectiveGlobalToday = globalUsage.today + inFlightGlobalDaily;
 
-      return {
-        error: errorMessage,
-        source: providerKey,
+        if (globalDailyBudget && effectiveGlobalToday >= globalDailyBudget) {
+          logTrackingDiagnostic("warn", "Global daily quota budget reached", {
+            provider,
+            courier,
+            awb: cleanAwb,
+            usedToday: effectiveGlobalToday,
+            dailyBudget: globalDailyBudget,
+            source,
+          });
+          return {
+            skipped: true,
+            reason: `Global daily quota budget reached (${effectiveGlobalToday}/${globalDailyBudget})`,
+            error: `Global daily budget exhausted (${effectiveGlobalToday}/${globalDailyBudget})`,
+            provider,
+            courier,
+            trackingNumber: cleanAwb,
+          };
+        }
+
+        if (globalMonthlyBudget && globalUsage.month >= globalMonthlyBudget) {
+          logTrackingDiagnostic("warn", "Global monthly quota budget reached", {
+            provider,
+            courier,
+            awb: cleanAwb,
+            usedMonth: globalUsage.month,
+            monthlyBudget: globalMonthlyBudget,
+            source,
+          });
+          return {
+            skipped: true,
+            reason: `Global monthly quota budget reached (${globalUsage.month}/${globalMonthlyBudget})`,
+            error: `Global monthly budget exhausted (${globalUsage.month}/${globalMonthlyBudget})`,
+            provider,
+            courier,
+            trackingNumber: cleanAwb,
+          };
+        }
+      }
+
+      // 6. Provider-specific Daily and Monthly budget check (with in-flight reservation accounting)
+      if (providerCfg) {
+        const usage = await getProviderUsage(providerKey);
+        const inFlightForProvider = inFlightProviderDaily.get(providerKey) || 0;
+        const effectiveProviderToday = usage.today + inFlightForProvider;
+
+        if (providerCfg.dailyBudget && effectiveProviderToday >= providerCfg.dailyBudget) {
+          tripCircuitBreaker(providerKey, `Daily budget reached (${effectiveProviderToday}/${providerCfg.dailyBudget})`);
+          logTrackingDiagnostic("warn", `Daily budget exhausted for ${provider}`, {
+            provider,
+            courier,
+            awb: cleanAwb,
+            usedToday: effectiveProviderToday,
+            dailyBudget: providerCfg.dailyBudget,
+            source,
+          });
+          return {
+            skipped: true,
+            reason: `Daily quota budget reached for ${provider} (${effectiveProviderToday}/${providerCfg.dailyBudget})`,
+            error: `Daily budget exhausted for ${provider}`,
+            provider,
+            courier,
+            trackingNumber: cleanAwb,
+          };
+        }
+
+        if (providerCfg.monthlyBudget && usage.month >= providerCfg.monthlyBudget) {
+          tripCircuitBreaker(providerKey, `Monthly budget reached (${usage.month}/${providerCfg.monthlyBudget})`);
+          logTrackingDiagnostic("warn", `Monthly budget exhausted for ${provider}`, {
+            provider,
+            courier,
+            awb: cleanAwb,
+            usedMonth: usage.month,
+            monthlyBudget: providerCfg.monthlyBudget,
+            source,
+          });
+          return {
+            skipped: true,
+            reason: `Monthly quota budget reached for ${provider} (${usage.month}/${providerCfg.monthlyBudget})`,
+            error: `Monthly budget exhausted for ${provider}`,
+            provider,
+            courier,
+            trackingNumber: cleanAwb,
+          };
+        }
+      }
+
+      // Atomically reserve quota slot for both global and provider budgets
+      hasReservedSlot = true;
+      inFlightGlobalDaily++;
+      inFlightProviderDaily.set(providerKey, (inFlightProviderDaily.get(providerKey) || 0) + 1);
+
+      // 7. Concurrency Limiter & In-Flight Tracking
+      const maxConcurrent = cachedSettings.maxConcurrentRequests || 1;
+      await acquireConcurrencySlot(maxConcurrent);
+      const startTime = Date.now();
+      let result = null;
+      let statusCode = 200;
+      let errorMessage = null;
+      let isSuccess = false;
+
+      logTrackingDiagnostic("info", "Starting tracking execution", {
         provider,
         courier,
-        trackingNumber: cleanAwb,
-        statusCode,
-      };
-    } finally {
-      const durationMs = Date.now() - startTime;
-      releaseConcurrencySlot();
-      inFlightRequests.delete(dedupKey);
+        awb: cleanAwb,
+        source,
+      });
 
-      // Safe ledger logging
-      if (mongoose.connection.readyState === 1) {
-        try {
-          await TrackingLedger.create({
-            provider: providerKey,
-            courier_name: courier,
-            awb: cleanAwb,
-            source,
-            status_code: statusCode,
-            success: isSuccess,
-            error_message: errorMessage ? errorMessage.slice(0, 300) : null,
-            duration_ms: durationMs,
-            quota_consumed: 1,
-          });
-        } catch (ledgerErr) {
-          // Ignore ledger db write errors in testing/disconnected state
+      try {
+        result = await executeFn();
+
+        statusCode = result.statusCode || (result.error ? 500 : 200);
+        errorMessage = result.error || null;
+        isSuccess = !result.error && (!!result.status || !!result.rawStatus);
+
+        // Inspect for non-retryable errors
+        const isActualQuota =
+          result.isQuotaError ||
+          statusCode === 402 ||
+          (providerKey.startsWith("trackcourier") && (errorMessage?.includes("402") || errorMessage?.toLowerCase().includes("quota exceeded")));
+
+        if (isActualQuota) {
+          statusCode = 402;
+          tripCircuitBreaker(providerKey, "Quota exhausted (HTTP 402)");
+        } else if (result.isRateLimitError || statusCode === 429 || errorMessage?.includes("429") || errorMessage?.toLowerCase().includes("too many requests")) {
+          statusCode = 429;
+          // Trip rate limit breaker for 120 seconds
+          tripCircuitBreaker(providerKey, "Rate limit reached (HTTP 429)", 120 * 1000);
+        } else if (result.isAuthError || statusCode === 401 || statusCode === 403 || (providerKey === "dtdc" && errorMessage?.includes("401"))) {
+          tripCircuitBreaker(providerKey, `Authentication failed (HTTP ${statusCode === 403 ? 403 : 401})`);
+        }
+
+        // Record outcomes
+        const outcome = providerLastOutcomes[providerKey] || (providerLastOutcomes[providerKey] = {});
+        if (isSuccess) {
+          outcome.lastSuccess = new Date();
+        } else {
+          outcome.lastError = errorMessage;
+          outcome.lastErrorTime = new Date();
+        }
+
+        // Record shipment cooldown
+        recordShipmentQuery(providerKey, cleanAwb);
+
+        return result;
+      } catch (err) {
+        errorMessage = err.message || "Unknown error during tracking execution";
+        statusCode = 500;
+        isSuccess = false;
+
+        const outcome = providerLastOutcomes[providerKey] || (providerLastOutcomes[providerKey] = {});
+        outcome.lastError = errorMessage;
+        outcome.lastErrorTime = new Date();
+
+        return {
+          error: errorMessage,
+          source: providerKey,
+          provider,
+          courier,
+          trackingNumber: cleanAwb,
+          statusCode,
+        };
+      } finally {
+        const durationMs = Date.now() - startTime;
+        releaseConcurrencySlot();
+
+        logTrackingDiagnostic(isSuccess ? "info" : "warn", "Completed tracking execution", {
+          provider,
+          courier,
+          awb: cleanAwb,
+          source,
+          statusCode,
+          success: isSuccess,
+          durationMs,
+        });
+
+        // Safe ledger logging
+        if (mongoose.connection.readyState === 1) {
+          try {
+            await TrackingLedger.create({
+              provider: providerKey,
+              courier_name: courier,
+              awb: cleanAwb,
+              source,
+              status_code: statusCode,
+              success: isSuccess,
+              error_message: errorMessage ? errorMessage.slice(0, 300) : null,
+              duration_ms: durationMs,
+              quota_consumed: 1,
+            });
+          } catch (ledgerErr) {
+            // Ignore ledger db write errors in testing/disconnected state
+          }
+        }
+      }
+    } finally {
+      if (hasReservedSlot) {
+        inFlightGlobalDaily = Math.max(0, inFlightGlobalDaily - 1);
+        const curReserved = inFlightProviderDaily.get(providerKey) || 0;
+        if (curReserved <= 1) {
+          inFlightProviderDaily.delete(providerKey);
+        } else {
+          inFlightProviderDaily.set(providerKey, curReserved - 1);
         }
       }
     }
   })();
 
   inFlightRequests.set(dedupKey, requestPromise);
+  requestPromise.finally(() => {
+    inFlightRequests.delete(dedupKey);
+  });
   return requestPromise;
 }
 

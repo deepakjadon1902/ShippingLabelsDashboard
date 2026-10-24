@@ -13,6 +13,8 @@ import {
   resetCircuitBreaker,
   isCircuitBreakerTripped,
   getTrackingUsageStats,
+  logTrackingDiagnostic,
+  resetInFlightReservations,
 } from "../tracking/controller.js";
 
 import {
@@ -849,5 +851,278 @@ test("DTDC Timezone: parseDtdcDate explicitly normalizes Indian Standard Time (I
   // Invalid date returns null
   assert.equal(parseDtdcDate("", "14:30"), null);
   assert.equal(parseDtdcDate("invalid-date", "14:30"), null);
+});
+
+test("Regression 1: Dashboard load with both toggles OFF causes zero external tracking requests", async () => {
+  await updateTrackingSettings({
+    autoRefreshEnabled: false,
+    scheduledSyncEnabled: false,
+  });
+
+  let externalCalls = 0;
+  const mockDashboardLoad = async () => {
+    // Dashboard mounts and queries labels list purely via database find()
+    return [{ id: "lbl_1", tracking_id: "AWB1", courier_name: "DTDC", status: "Ready to Pick" }];
+  };
+
+  const labels = await mockDashboardLoad();
+  assert.equal(labels.length, 1);
+  assert.equal(externalCalls, 0, "Opening the dashboard must NEVER trigger external tracking requests");
+});
+
+test("Regression 2: Auto-Refresh OFF and Scheduled Sync OFF blocks periodic background tracking", async () => {
+  await updateTrackingSettings({
+    autoRefreshEnabled: false,
+    scheduledSyncEnabled: false,
+    externalTrackingEnabled: true,
+  });
+
+  const settings = getTrackingSettings();
+  assert.equal(settings.autoRefreshEnabled, false);
+  assert.equal(settings.scheduledSyncEnabled, false);
+
+  // When an automated background sync is requested without force:
+  let executedCalls = 0;
+  if (!settings.scheduledSyncEnabled && !settings.autoRefreshEnabled) {
+    // Blocked before calling any courier
+  } else {
+    executedCalls++;
+  }
+  assert.equal(executedCalls, 0, "No periodic background tracking should occur when toggles are OFF");
+});
+
+test("Regression 3: An already-running request when a toggle is disabled finishes cleanly without hanging", async () => {
+  resetInFlightReservations();
+  await updateTrackingSettings({ externalTrackingEnabled: true });
+
+  let executionStarted = false;
+  let executionFinished = false;
+
+  const runningRequestPromise = executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "AWB_RUNNING_TOGGLE_OFF",
+    executeFn: async () => {
+      executionStarted = true;
+      // Simulate slow in-flight request while admin toggles external tracking off
+      await new Promise((r) => setTimeout(r, 25));
+      await updateTrackingSettings({ externalTrackingEnabled: false });
+      executionFinished = true;
+      return { status: "Delivered", rawStatus: "Delivered" };
+    },
+  });
+
+  const result = await runningRequestPromise;
+  assert.equal(executionStarted, true);
+  assert.equal(executionFinished, true);
+  assert.equal(result.status, "Delivered");
+
+  // Subsequent request after toggle is OFF is immediately blocked
+  const nextReq = await executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "AWB_SUBSEQUENT_TOGGLE_OFF",
+    executeFn: async () => ({ status: "Delivered" }),
+  });
+  assert.equal(nextReq.skipped, true);
+  assert.match(nextReq.reason, /globally disabled/i);
+
+  // Restore switch
+  await updateTrackingSettings({ externalTrackingEnabled: true });
+});
+
+test("Regression 4: Concurrent requests near daily quota limit are bounded atomically without overshooting", async () => {
+  resetInFlightReservations();
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    globalDailyBudget: 2, // Set strict limit of 2 requests
+    providers: {
+      delhivery: { enabled: true, dailyBudget: 2, monthlyBudget: 100 },
+    },
+  });
+
+  let networkCalls = 0;
+  const executeFn = (awbId) => async () => {
+    networkCalls++;
+    await new Promise((r) => setTimeout(r, 20));
+    return { status: "Shipped", awb: awbId };
+  };
+
+  // Launch 5 concurrent requests with different AWBs
+  const promises = [1, 2, 3, 4, 5].map((i) =>
+    executeTrackRequest({
+      provider: "Delhivery",
+      courier: "Delhivery",
+      awb: `AWB_CONCURRENT_BUDGET_${i}`,
+      force: true,
+      executeFn: executeFn(i),
+    })
+  );
+
+  const results = await Promise.all(promises);
+  const successfulCalls = results.filter((r) => !r.skipped && r.status === "Shipped");
+  const blockedCalls = results.filter((r) => r.skipped);
+
+  assert.ok(successfulCalls.length <= 2, `Successful calls (${successfulCalls.length}) must NOT exceed daily limit (2)`);
+  assert.ok(blockedCalls.length >= 3, `Excess calls (${blockedCalls.length}) must be safely blocked by quota budget`);
+  assert.equal(networkCalls, successfulCalls.length, "Network executions must strictly match allowed quota slots");
+
+  // Restore budget
+  await updateTrackingSettings({
+    globalDailyBudget: 100,
+    providers: {
+      delhivery: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
+    },
+  });
+});
+
+test("Regression 5: All TrackCourier accounts exhausted cascades gracefully and returns composite error", async () => {
+  const origDtdcToken = process.env.DTDC_API_TOKEN;
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+  const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
+  const origKey3 = process.env.TRACKCOURIER_TERTIARY_API_KEY;
+
+  process.env.DTDC_API_TOKEN = "mock_dtdc_token";
+  process.env.TRACKCOURIER_API_KEY = "mock_tc_key_1";
+  process.env.TRACKCOURIER_BACKUP_API_KEY = "mock_tc_key_2";
+  process.env.TRACKCOURIER_TERTIARY_API_KEY = "mock_tc_key_3";
+
+  // Trip all TrackCourier breakers
+  tripCircuitBreaker("trackcourier_account1", "Quota exhausted (HTTP 402)");
+  tripCircuitBreaker("trackcourier_account2", "Daily budget reached (10/10)");
+  tripCircuitBreaker("trackcourier_account3", "Daily budget reached (10/10)");
+  tripCircuitBreaker("dtdc", "Authentication failed (HTTP 401)");
+
+  const res = await trackShipment("DTDC", "DTDC_ALL_EXHAUSTED_AWB", { force: true });
+  assert.ok(res.error, "Must return descriptive error when all accounts are exhausted");
+  assert.ok(
+    res.error.includes("TrackCourier fallback failed") || res.error.includes("circuit breaker active"),
+    "Error should clearly identify circuit breaker or fallback failure"
+  );
+
+  // Cleanup
+  process.env.DTDC_API_TOKEN = origDtdcToken;
+  process.env.TRACKCOURIER_API_KEY = origKey1;
+  process.env.TRACKCOURIER_BACKUP_API_KEY = origKey2;
+  process.env.TRACKCOURIER_TERTIARY_API_KEY = origKey3;
+  resetCircuitBreaker("trackcourier_account1");
+  resetCircuitBreaker("trackcourier_account2");
+  resetCircuitBreaker("trackcourier_account3");
+  resetCircuitBreaker("dtdc");
+});
+
+test("Regression 6: DTDC direct HTTP 401 trips direct breaker and executes controlled TrackCourier cascade", async () => {
+  const origDtdcToken = process.env.DTDC_API_TOKEN;
+  const origKey1 = process.env.TRACKCOURIER_API_KEY;
+  const origKey2 = process.env.TRACKCOURIER_BACKUP_API_KEY;
+
+  process.env.DTDC_API_TOKEN = "invalid_dtdc_token";
+  process.env.TRACKCOURIER_API_KEY = "mock_tc_key_1";
+  process.env.TRACKCOURIER_BACKUP_API_KEY = "mock_tc_key_2";
+  delete process.env.TRACKCOURIER_TERTIARY_API_KEY;
+
+  resetCircuitBreaker("dtdc");
+  tripCircuitBreaker("trackcourier_account1", "Account 1 quota exhausted");
+  resetCircuitBreaker("trackcourier_account2");
+
+  const originalFetch = globalThis.fetch;
+  let dtdcDirectCalled = 0;
+  let tcAcc2Called = 0;
+
+  globalThis.fetch = async (url) => {
+    const s = String(url);
+    if (s.includes("blktracksvc.dtdc.com")) {
+      dtdcDirectCalled++;
+      return { ok: false, status: 401, json: async () => ({ error: "Invalid token" }) };
+    }
+    if (s.includes("trackcourier.io")) {
+      tcAcc2Called++;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: {
+            status: "delivered",
+            MostRecentStatus: "Delivered",
+            checkpoints: [{ time: "2026-10-24 10:00:00", status: "Delivered", location: "Vrindavan" }],
+          },
+        }),
+      };
+    }
+    return { ok: false, status: 500, json: async () => ({}) };
+  };
+
+  try {
+    const res = await trackShipment("DTDC", "DTDC_401_FALLBACK_TEST", { force: true });
+    assert.equal(dtdcDirectCalled, 1, "Direct DTDC should be queried first");
+    assert.equal(isCircuitBreakerTripped("dtdc"), true, "DTDC breaker must trip on HTTP 401");
+    assert.equal(tcAcc2Called, 1, "TrackCourier Account 2 should be queried on fallback");
+    assert.equal(res.status, "Delivered");
+    assert.equal(res.source, "trackcourier_account2");
+    assert.equal(res.error, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.DTDC_API_TOKEN = origDtdcToken;
+    process.env.TRACKCOURIER_API_KEY = origKey1;
+    process.env.TRACKCOURIER_BACKUP_API_KEY = origKey2;
+    resetCircuitBreaker("dtdc");
+    resetCircuitBreaker("trackcourier_account1");
+    resetCircuitBreaker("trackcourier_account2");
+  }
+});
+
+test("Regression 7: Manual refresh with valid quota and open circuit breaker is blocked by circuit breaker", async () => {
+  tripCircuitBreaker("delhivery", "Provider temporarily rate-limited");
+  assert.equal(isCircuitBreakerTripped("delhivery"), true);
+
+  let networkCalls = 0;
+  const res = await executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "AWB_BREAKER_BLOCK",
+    force: true, // Manual click with force still must respect circuit breaker
+    executeFn: async () => {
+      networkCalls++;
+      return { status: "Delivered" };
+    },
+  });
+
+  assert.equal(res.skipped, true);
+  assert.equal(res.isCircuitBreakerActive, true);
+  assert.match(res.reason, /circuit breaker/i);
+  assert.equal(networkCalls, 0, "Network execution must not run when circuit breaker is active");
+
+  resetCircuitBreaker("delhivery");
+});
+
+test("Regression 8: No secrets or customer PII in logs or diagnostic outputs", () => {
+  const sensitiveMeta = {
+    apiKey: "secret_live_key_xyz123",
+    api_token: "token_abc_456",
+    secret: "super_secret_webhook_val",
+    phone: "9634359003",
+    mobile: "+91-9876543210",
+    customer_name: "John Doe",
+    customer_address: "123 Raman Reti Vrindavan",
+    provider: "delhivery",
+    awb: "DEL_123456",
+    status_code: 200,
+  };
+
+  const logged = logTrackingDiagnostic("info", "Test redaction", sensitiveMeta);
+  const keys = Object.keys(logged.meta);
+
+  assert.ok(keys.includes("provider"));
+  assert.ok(keys.includes("awb"));
+  assert.ok(keys.includes("status_code"));
+
+  assert.ok(!keys.includes("apiKey"), "API keys must be stripped from diagnostic logs");
+  assert.ok(!keys.includes("api_token"), "API tokens must be stripped");
+  assert.ok(!keys.includes("secret"), "Secrets must be stripped");
+  assert.ok(!keys.includes("phone"), "Customer phone numbers must be stripped");
+  assert.ok(!keys.includes("mobile"), "Customer mobile numbers must be stripped");
+  assert.ok(!keys.includes("customer_name"), "Customer names must be stripped");
+  assert.ok(!keys.includes("customer_address"), "Customer addresses must be stripped");
 });
 

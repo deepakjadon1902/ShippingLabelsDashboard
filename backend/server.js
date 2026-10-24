@@ -24,6 +24,7 @@ import {
   updateTrackingSettings,
   getTrackingUsageStats,
   resetCircuitBreaker,
+  initTrackingSettings,
 } from "./tracking/index.js";
 
 import path from "node:path";
@@ -617,6 +618,15 @@ app.post(
   "/api/tracking/labels/:id/refresh",
   requireAuth,
   asyncHandler(async (req, res) => {
+    const settings = getTrackingSettings();
+    if (!settings.externalTrackingEnabled) {
+      return res.json({
+        skipped: true,
+        reason: "External API tracking is globally disabled by administrator policy",
+        error: "External tracking disabled",
+      });
+    }
+
     const label = await Label.findById(req.params.id);
     if (!label) return res.status(404).json({ error: "Label not found" });
 
@@ -633,7 +643,8 @@ app.post(
       }
     }
 
-    res.json(await refreshOneLabel(label, { force: true }));
+    const isForce = req.body?.force === true || req.query?.force === "true";
+    res.json(await refreshOneLabel(label, { force: isForce, source: "manual" }));
   }),
 );
 
@@ -645,7 +656,7 @@ app.post(
     if (!settings.externalTrackingEnabled) {
       return res.status(403).json({ error: "External tracking is globally disabled" });
     }
-    res.json(await refreshAllLabels());
+    res.json(await refreshAllLabels({ source: "batch", force: true }));
   }),
 );
 
@@ -653,10 +664,18 @@ app.post(
   "/api/public/hooks/refresh-tracking",
   asyncHandler(async (req, res) => {
     const configuredSecret = process.env.PUBLIC_TRACKING_HOOK_SECRET;
-    if (configuredSecret) {
-      const headerSecret = req.get("x-hook-secret") || req.query.secret;
-      if (headerSecret !== configuredSecret) return res.status(401).json({ error: "Unauthorized" });
+    if (!configuredSecret) {
+      return res.status(503).json({
+        ok: false,
+        error: "Webhook endpoint not configured: PUBLIC_TRACKING_HOOK_SECRET is missing",
+      });
     }
+
+    const headerSecret = req.get("x-hook-secret") || req.query.secret;
+    if (!headerSecret || !secureCompare(headerSecret, configuredSecret)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
     const settings = getTrackingSettings();
     if (!settings.scheduledSyncEnabled) {
       return res.status(403).json({
@@ -664,7 +683,7 @@ app.post(
         error: "Scheduled bulk tracking sync is currently disabled by administrator configuration.",
       });
     }
-    res.json(await refreshAllLabels());
+    res.json(await refreshAllLabels({ source: "cron" }));
   }),
 );
 
@@ -740,11 +759,28 @@ async function refreshAllLabels(filter = {}) {
     return { total: 0, processed: 0, skipped: 0, failed: 0, updated: 0, reason: "External tracking disabled" };
   }
 
+  // If called as periodic or scheduled sync, verify the respective administrative control is enabled
+  const isForced = filter.force === true;
+  const isExplicitBatch = filter.source === "batch";
+  if (!isForced && !isExplicitBatch && !settings.scheduledSyncEnabled && !settings.autoRefreshEnabled) {
+    return {
+      total: 0,
+      processed: 0,
+      skipped: 0,
+      failed: 0,
+      updated: 0,
+      reason: "Scheduled sync and auto-refresh are disabled by administrator policy",
+    };
+  }
+
   const maxBatch = settings.maxBatchSize || 10;
   const query = {
     status: { $nin: ["Delivered", "RTO"] },
     ...filter,
   };
+  delete query.force;
+  delete query.source;
+
   const labels = await Label.find(query).sort({ last_sync_attempt: 1, created_at: -1 }).limit(maxBatch);
   let processed = 0;
   let skipped = 0;
@@ -759,7 +795,10 @@ async function refreshAllLabels(filter = {}) {
     processed++;
     try {
       const before = label.status;
-      const result = await refreshOneLabel(label, { source: "batch" });
+      const result = await refreshOneLabel(label, {
+        source: filter.source || "batch",
+        force: isForced,
+      });
       if (result.skipped) {
         skipped++;
         continue;
@@ -800,6 +839,7 @@ async function seedSenderProfiles() {
 
 async function start() {
   await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 });
+  await initTrackingSettings();
   await seedAdminUser();
   app.listen(PORT, () => {
     console.log(`Backend running on http://localhost:${PORT}`);

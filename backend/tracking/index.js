@@ -37,6 +37,10 @@ import {
   resetCircuitBreaker,
   tripCircuitBreaker,
   isCircuitBreakerTripped,
+  initTrackingSettings,
+  getGlobalUsage,
+  logTrackingDiagnostic,
+  resetInFlightReservations,
 } from "./controller.js";
 
 export {
@@ -48,6 +52,10 @@ export {
   resetCircuitBreaker,
   tripCircuitBreaker,
   isCircuitBreakerTripped,
+  initTrackingSettings,
+  getGlobalUsage,
+  logTrackingDiagnostic,
+  resetInFlightReservations,
 };
 
 export const AUTO_TRACK_COURIERS = new Set([

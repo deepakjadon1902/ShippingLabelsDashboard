@@ -2,7 +2,7 @@
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import { Label } from "../models/Label.js";
-import { refreshOneLabel, getTrackingSettings } from "../tracking/index.js";
+import { refreshOneLabel, getTrackingSettings, initTrackingSettings } from "../tracking/index.js";
 
 import path from "path";
 import { fileURLToPath } from "url";
@@ -45,6 +45,7 @@ async function runSync() {
       serverSelectionTimeoutMS: 15000,
     });
     console.log(" Connected to MongoDB successfully.");
+    await initTrackingSettings();
   } catch (error) {
     console.error("❌ Fatal: Failed to connect to MongoDB:", error.message);
     process.exit(1);

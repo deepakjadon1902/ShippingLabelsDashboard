@@ -41,6 +41,8 @@ import {
   getGlobalUsage,
   logTrackingDiagnostic,
   resetInFlightReservations,
+  UNMETERED_PROVIDERS,
+  isUnmeteredProvider,
 } from "./controller.js";
 
 export {
@@ -56,6 +58,8 @@ export {
   getGlobalUsage,
   logTrackingDiagnostic,
   resetInFlightReservations,
+  UNMETERED_PROVIDERS,
+  isUnmeteredProvider,
 };
 
 export const AUTO_TRACK_COURIERS = new Set([

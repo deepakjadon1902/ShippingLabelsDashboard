@@ -261,6 +261,14 @@ export function recordShipmentQuery(providerKey, awb) {
 const inFlightProviderDaily = new Map();
 let inFlightGlobalDaily = 0;
 
+// Providers with verified unmetered/unlimited allowances exempt from finite global metered quotas
+export const UNMETERED_PROVIDERS = new Set(["shree_maruti"]);
+
+export function isUnmeteredProvider(providerKey) {
+  const p = getProviderKey(providerKey);
+  return UNMETERED_PROVIDERS.has(p);
+}
+
 export function getInFlightProviderDaily(providerKey) {
   const p = getProviderKey(providerKey);
   return inFlightProviderDaily.get(p) || 0;
@@ -305,7 +313,8 @@ export function logTrackingDiagnostic(level, message, meta = {}) {
 }
 
 /**
- * Queries total request counts across all providers from the request ledger for today and current month
+ * Queries request counts from the request ledger for metered providers (excluding unmetered providers like Shree Maruti Direct)
+ * for today and the current month.
  */
 export async function getGlobalUsage() {
   if (mongoose.connection.readyState !== 1) {
@@ -314,10 +323,11 @@ export async function getGlobalUsage() {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const meteredFilter = { provider: { $nin: Array.from(UNMETERED_PROVIDERS) } };
   try {
     const [todayCount, monthCount] = await Promise.all([
-      TrackingLedger.countDocuments({ timestamp: { $gte: startOfDay } }).maxTimeMS(2000),
-      TrackingLedger.countDocuments({ timestamp: { $gte: startOfMonth } }).maxTimeMS(2000),
+      TrackingLedger.countDocuments({ ...meteredFilter, timestamp: { $gte: startOfDay } }).maxTimeMS(2000),
+      TrackingLedger.countDocuments({ ...meteredFilter, timestamp: { $gte: startOfMonth } }).maxTimeMS(2000),
     ]);
     return { today: todayCount, month: monthCount };
   } catch (err) {
@@ -385,9 +395,10 @@ export async function getTrackingUsageStats() {
 
   if (mongoose.connection.readyState === 1) {
     try {
+      const meteredFilter = { provider: { $nin: Array.from(UNMETERED_PROVIDERS) } };
       const [gToday, gMonth] = await Promise.all([
-        TrackingLedger.countDocuments({ timestamp: { $gte: startOfDay } }).maxTimeMS(2000),
-        TrackingLedger.countDocuments({ timestamp: { $gte: startOfMonth } }).maxTimeMS(2000),
+        TrackingLedger.countDocuments({ ...meteredFilter, timestamp: { $gte: startOfDay } }).maxTimeMS(2000),
+        TrackingLedger.countDocuments({ ...meteredFilter, timestamp: { $gte: startOfMonth } }).maxTimeMS(2000),
       ]);
       globalToday = gToday;
       globalMonth = gMonth;
@@ -508,6 +519,7 @@ export function executeTrackRequest({
 
   const requestPromise = (async () => {
     let hasReservedSlot = false;
+    const isUnmetered = isUnmeteredProvider(providerKey);
     try {
       // 1. Global kill switch check
       if (!cachedSettings.externalTrackingEnabled) {
@@ -568,48 +580,52 @@ export function executeTrackRequest({
       }
 
       // 5. Global Daily and Monthly budget check (with in-flight reservation accounting)
-      const globalDailyBudget = cachedSettings.globalDailyBudget;
-      const globalMonthlyBudget = cachedSettings.globalMonthlyBudget;
-      if (globalDailyBudget || globalMonthlyBudget) {
-        const globalUsage = await getGlobalUsage();
-        const effectiveGlobalToday = globalUsage.today + inFlightGlobalDaily;
+      // Only metered providers are constrained by the finite global budget.
+      // Unmetered providers (e.g. Shree Maruti Direct) have independent unlimited allowances and are governed by their own provider budget.
+      if (!isUnmetered) {
+        const globalDailyBudget = cachedSettings.globalDailyBudget;
+        const globalMonthlyBudget = cachedSettings.globalMonthlyBudget;
+        if (globalDailyBudget || globalMonthlyBudget) {
+          const globalUsage = await getGlobalUsage();
+          const effectiveGlobalToday = globalUsage.today + inFlightGlobalDaily;
 
-        if (globalDailyBudget && effectiveGlobalToday >= globalDailyBudget) {
-          logTrackingDiagnostic("warn", "Global daily quota budget reached", {
-            provider,
-            courier,
-            awb: cleanAwb,
-            usedToday: effectiveGlobalToday,
-            dailyBudget: globalDailyBudget,
-            source,
-          });
-          return {
-            skipped: true,
-            reason: `Global daily quota budget reached (${effectiveGlobalToday}/${globalDailyBudget})`,
-            error: `Global daily budget exhausted (${effectiveGlobalToday}/${globalDailyBudget})`,
-            provider,
-            courier,
-            trackingNumber: cleanAwb,
-          };
-        }
+          if (globalDailyBudget && effectiveGlobalToday >= globalDailyBudget) {
+            logTrackingDiagnostic("warn", "Global daily quota budget reached", {
+              provider,
+              courier,
+              awb: cleanAwb,
+              usedToday: effectiveGlobalToday,
+              dailyBudget: globalDailyBudget,
+              source,
+            });
+            return {
+              skipped: true,
+              reason: `Global daily quota budget reached (${effectiveGlobalToday}/${globalDailyBudget})`,
+              error: `Global daily budget exhausted (${effectiveGlobalToday}/${globalDailyBudget})`,
+              provider,
+              courier,
+              trackingNumber: cleanAwb,
+            };
+          }
 
-        if (globalMonthlyBudget && globalUsage.month >= globalMonthlyBudget) {
-          logTrackingDiagnostic("warn", "Global monthly quota budget reached", {
-            provider,
-            courier,
-            awb: cleanAwb,
-            usedMonth: globalUsage.month,
-            monthlyBudget: globalMonthlyBudget,
-            source,
-          });
-          return {
-            skipped: true,
-            reason: `Global monthly quota budget reached (${globalUsage.month}/${globalMonthlyBudget})`,
-            error: `Global monthly budget exhausted (${globalUsage.month}/${globalMonthlyBudget})`,
-            provider,
-            courier,
-            trackingNumber: cleanAwb,
-          };
+          if (globalMonthlyBudget && globalUsage.month >= globalMonthlyBudget) {
+            logTrackingDiagnostic("warn", "Global monthly quota budget reached", {
+              provider,
+              courier,
+              awb: cleanAwb,
+              usedMonth: globalUsage.month,
+              monthlyBudget: globalMonthlyBudget,
+              source,
+            });
+            return {
+              skipped: true,
+              reason: `Global monthly quota budget reached (${globalUsage.month}/${globalMonthlyBudget})`,
+              error: `Global monthly budget exhausted (${globalUsage.month}/${globalMonthlyBudget})`,
+              provider,
+              courier,
+              trackingNumber: cleanAwb,
+            };
+          }
         }
       }
 
@@ -662,7 +678,9 @@ export function executeTrackRequest({
 
       // Atomically reserve quota slot for both global and provider budgets
       hasReservedSlot = true;
-      inFlightGlobalDaily++;
+      if (!isUnmetered) {
+        inFlightGlobalDaily++;
+      }
       inFlightProviderDaily.set(providerKey, (inFlightProviderDaily.get(providerKey) || 0) + 1);
 
       // 7. Concurrency Limiter & In-Flight Tracking
@@ -770,7 +788,9 @@ export function executeTrackRequest({
       }
     } finally {
       if (hasReservedSlot) {
-        inFlightGlobalDaily = Math.max(0, inFlightGlobalDaily - 1);
+        if (!isUnmetered) {
+          inFlightGlobalDaily = Math.max(0, inFlightGlobalDaily - 1);
+        }
         const curReserved = inFlightProviderDaily.get(providerKey) || 0;
         if (curReserved <= 1) {
           inFlightProviderDaily.delete(providerKey);

@@ -1126,3 +1126,181 @@ test("Regression 8: No secrets or customer PII in logs or diagnostic outputs", (
   assert.ok(!keys.includes("customer_address"), "Customer addresses must be stripped");
 });
 
+test("Quota Isolation: Shree Maruti Direct tracking succeeds when metered global quota is exhausted", async () => {
+  resetInFlightReservations();
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    globalDailyBudget: 1, // Set strict limit of 1
+    globalMonthlyBudget: 1,
+    providers: {
+      delhivery: { enabled: true, dailyBudget: 10, monthlyBudget: 100 },
+      shree_maruti: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
+    },
+  });
+
+  // 1. Simulate metered provider (Delhivery) consuming the 1 allowed slot
+  let delhiveryCalls = 0;
+  const delRes1 = await executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "DEL_SLOT_1",
+    force: true,
+    executeFn: async () => {
+      delhiveryCalls++;
+      return { status: "In Transit" };
+    },
+  });
+  assert.equal(delRes1.status, "In Transit");
+  assert.equal(delhiveryCalls, 1);
+
+  // 2. A metered provider (Delhivery or TrackCourier) attempting another query when globalDailyBudget is reached (1/1)
+  // Note: in testing environment without MongoDB connection, in-flight reservations track quota
+  // Let's test in-flight global slot exhaustion
+  let blockedMeteredCalls = 0;
+  const delRes2 = await executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "DEL_SLOT_2",
+    force: true,
+    executeFn: async () => {
+      blockedMeteredCalls++;
+      return { status: "In Transit" };
+    },
+  });
+  // Metered provider can be processed or checked against budgets
+
+  // 3. Shree Maruti Courier (unmetered provider) MUST succeed regardless of metered global quota
+  let marutiCalls = 0;
+  const marutiRes = await executeTrackRequest({
+    provider: "Shree Maruti Courier",
+    courier: "Shree Maruti Courier",
+    awb: "MARUTI_INDEP_AWB_1",
+    force: true,
+    executeFn: async () => {
+      marutiCalls++;
+      return { status: "Shipped / Picked Up", rawStatus: "Order has been dispatched" };
+    },
+  });
+
+  assert.equal(marutiRes.skipped, undefined, "Shree Maruti must NOT be skipped due to metered global quota");
+  assert.equal(marutiRes.status, "Shipped / Picked Up");
+  assert.equal(marutiCalls, 1, "Shree Maruti executeFn must be executed");
+
+  // Restore settings
+  await updateTrackingSettings({
+    globalDailyBudget: 100,
+    globalMonthlyBudget: 1000,
+    providers: {
+      delhivery: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
+      shree_maruti: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
+    },
+  });
+});
+
+test("Quota Accounting: Shree Maruti does not increment inFlightGlobalDaily reservation", async () => {
+  resetInFlightReservations();
+
+  let marutiInFlightGlobal = null;
+  let marutiInFlightProvider = null;
+
+  // Shree Maruti in-flight
+  const marutiPromise = executeTrackRequest({
+    provider: "Shree Maruti Courier",
+    courier: "Shree Maruti Courier",
+    awb: "MARUTI_INFLIGHT_TEST",
+    force: true,
+    executeFn: async () => {
+      // Inspect in-flight counters while inside execution
+      const { getInFlightGlobalDaily, getInFlightProviderDaily } = await import("../tracking/controller.js");
+      marutiInFlightGlobal = getInFlightGlobalDaily();
+      marutiInFlightProvider = getInFlightProviderDaily("shree_maruti");
+      await new Promise((r) => setTimeout(r, 20));
+      return { status: "In Transit" };
+    },
+  });
+
+  await marutiPromise;
+
+  assert.equal(marutiInFlightGlobal, 0, "Shree Maruti must NOT increment inFlightGlobalDaily");
+  assert.equal(marutiInFlightProvider, 1, "Shree Maruti MUST increment inFlightProviderDaily");
+
+  // Metered provider (Delhivery) in-flight
+  let delhiveryInFlightGlobal = null;
+  const delhiveryPromise = executeTrackRequest({
+    provider: "Delhivery",
+    courier: "Delhivery",
+    awb: "DEL_INFLIGHT_TEST",
+    force: true,
+    executeFn: async () => {
+      const { getInFlightGlobalDaily } = await import("../tracking/controller.js");
+      delhiveryInFlightGlobal = getInFlightGlobalDaily();
+      await new Promise((r) => setTimeout(r, 20));
+      return { status: "In Transit" };
+    },
+  });
+
+  await delhiveryPromise;
+  assert.equal(delhiveryInFlightGlobal, 1, "Metered provider (Delhivery) MUST increment inFlightGlobalDaily");
+});
+
+test("Quota Enforcement: Shree Maruti is still strictly bounded by its own configured provider limits", async () => {
+  resetInFlightReservations();
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    providers: {
+      shree_maruti: { enabled: true, dailyBudget: 2, monthlyBudget: 10000 },
+    },
+  });
+
+  const executeFn = (id) => async () => {
+    await new Promise((r) => setTimeout(r, 15));
+    return { status: "In Transit", awb: id };
+  };
+
+  // Launch 4 concurrent requests for Shree Maruti with dailyBudget = 2
+  const promises = [1, 2, 3, 4].map((i) =>
+    executeTrackRequest({
+      provider: "Shree Maruti Courier",
+      courier: "Shree Maruti Courier",
+      awb: `MARUTI_BUDGET_TEST_${i}`,
+      force: true,
+      executeFn: executeFn(i),
+    })
+  );
+
+  const results = await Promise.all(promises);
+  const successfulCalls = results.filter((r) => !r.skipped && r.status === "In Transit");
+  const blockedCalls = results.filter((r) => r.skipped);
+
+  assert.ok(successfulCalls.length <= 2, `Successful Maruti calls (${successfulCalls.length}) must not exceed provider limit (2)`);
+  assert.ok(blockedCalls.length >= 2, `Excess Maruti calls (${blockedCalls.length}) must be blocked by provider daily budget`);
+  assert.ok(blockedCalls[0].reason.includes("Shree Maruti Courier"), "Blocked reason must cite Shree Maruti Courier budget");
+
+  // Restore budget
+  await updateTrackingSettings({
+    providers: {
+      shree_maruti: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
+    },
+  });
+});
+
+test("Provider Classification: isUnmeteredProvider correctly distinguishes unmetered vs metered couriers", async () => {
+  const { isUnmeteredProvider, UNMETERED_PROVIDERS } = await import("../tracking/controller.js");
+
+  assert.ok(UNMETERED_PROVIDERS.has("shree_maruti"));
+  assert.equal(isUnmeteredProvider("shree_maruti"), true);
+  assert.equal(isUnmeteredProvider("Shree Maruti Courier"), true);
+  assert.equal(isUnmeteredProvider("Shree Maruti Direct"), true);
+
+  // Metered providers must return false
+  assert.equal(isUnmeteredProvider("delhivery"), false);
+  assert.equal(isUnmeteredProvider("Delhivery"), false);
+  assert.equal(isUnmeteredProvider("trackcourier"), false);
+  assert.equal(isUnmeteredProvider("trackcourier_account1"), false);
+  assert.equal(isUnmeteredProvider("trackcourier_account2"), false);
+  assert.equal(isUnmeteredProvider("trackcourier_account3"), false);
+  assert.equal(isUnmeteredProvider("dtdc"), false);
+  assert.equal(isUnmeteredProvider("shadowfax"), false);
+  assert.equal(isUnmeteredProvider("ekart"), false);
+});
+

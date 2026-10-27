@@ -643,8 +643,9 @@ app.post(
       }
     }
 
-    const isForce = req.body?.force === true || req.query?.force === "true";
-    res.json(await refreshOneLabel(label, { force: isForce, source: "manual" }));
+    // Single-shipment manual refresh follows configured per-shipment cooldown policy.
+    // Client-supplied force flags from request body or query are strictly ignored to prevent automated clients from bypassing cooldowns.
+    res.json(await refreshOneLabel(label, { force: false, source: "manual" }));
   }),
 );
 
@@ -656,7 +657,7 @@ app.post(
     if (!settings.externalTrackingEnabled) {
       return res.status(403).json({ error: "External tracking is globally disabled" });
     }
-    res.json(await refreshAllLabels({ source: "batch", force: true }));
+    res.json(await refreshAllLabels({ source: "batch", force: false }));
   }),
 );
 

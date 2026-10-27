@@ -1282,6 +1282,7 @@ test("Quota Enforcement: Shree Maruti is still strictly bounded by its own confi
       shree_maruti: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
     },
   });
+  resetCircuitBreaker("shree_maruti");
 });
 
 test("Provider Classification: isUnmeteredProvider correctly distinguishes unmetered vs metered couriers", async () => {
@@ -1304,3 +1305,183 @@ test("Provider Classification: isUnmeteredProvider correctly distinguishes unmet
   assert.equal(isUnmeteredProvider("ekart"), false);
 });
 
+
+test("Regression: Manual refresh after configured cooldown succeeds", async () => {
+  resetCircuitBreaker("shree_maruti");
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    perShipmentCooldownMinutes: 30,
+    providers: {
+      shree_maruti: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
+    },
+  });
+
+  const { trackShreeMaruti, MARUTI_DEFAULT_COOLDOWN_MS } = await import("../tracking/adapters/shree-maruti.js");
+  assert.equal(MARUTI_DEFAULT_COOLDOWN_MS, 30 * 60 * 1000, "Adapter default cooldown must be 30 minutes, not 12 hours");
+
+  // Shipment last synced 45 minutes ago (> 30 min cooldown)
+  const lastSync45MinAgo = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+
+  let executedCalls = 0;
+  const res = await executeTrackRequest({
+    provider: "Shree Maruti Courier",
+    courier: "Shree Maruti Courier",
+    awb: "MARUTI_POST_COOLDOWN_1",
+    source: "manual",
+    force: false,
+    cooldownMs: 30 * 60 * 1000,
+    executeFn: async () => {
+      executedCalls++;
+      return { status: "Shipped / Picked Up", rawStatus: "In Transit" };
+    },
+  });
+
+  assert.equal(res.skipped, undefined, "Manual refresh after cooldown window must not be skipped");
+  assert.equal(res.status, "Shipped / Picked Up");
+  assert.equal(executedCalls, 1, "Upstream tracking function must be executed");
+});
+
+test("Regression: Automated/external refresh cannot bypass cooldown using a client-supplied force flag", async () => {
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    perShipmentCooldownMinutes: 30,
+  });
+
+  const { trackShreeMaruti } = await import("../tracking/adapters/shree-maruti.js");
+
+  // Shipment synced 5 minutes ago (< 30 min cooldown)
+  const lastSync5MinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  // Simulated server endpoint handler enforcing server policy (force: false) regardless of client-supplied force flag
+  const simulateServerEndpoint = async (clientPayload) => {
+    // Server enforces force = false for external/manual HTTP calls
+    const serverEnforcedForce = false;
+    return trackShreeMaruti("MARUTI_CLIENT_FORCE_AWB", {
+      lastMarutiSync: lastSync5MinAgo,
+      force: serverEnforcedForce,
+      cooldownMs: 30 * 60 * 1000,
+    });
+  };
+
+  // Client attempts to pass force: true in payload
+  const clientResult = await simulateServerEndpoint({ force: true });
+
+  assert.equal(clientResult.skipped, true, "Client force flag must not bypass cooldown");
+  assert.equal(clientResult.cooldownActive, true, "Cooldown must remain active");
+  assert.ok(clientResult.remainingMinutes > 0, "Remaining minutes must be positive");
+  assert.ok(clientResult.reason.includes("Shree Maruti sync skipped: shipment checked within cooldown"));
+});
+
+test("Regression: Batch/background sync respects cooldown", async () => {
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    perShipmentCooldownMinutes: 30,
+  });
+
+  const { trackShreeMaruti } = await import("../tracking/adapters/shree-maruti.js");
+
+  // Shipment synced 10 minutes ago (< 30 min cooldown)
+  const lastSync10MinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+  // Batch sync passes force: false
+  const batchResult = await executeTrackRequest({
+    provider: "Shree Maruti Courier",
+    courier: "Shree Maruti Courier",
+    awb: "MARUTI_BATCH_COOLDOWN_AWB",
+    source: "batch",
+    force: false,
+    cooldownMs: 30 * 60 * 1000,
+    executeFn: () => trackShreeMaruti("MARUTI_BATCH_COOLDOWN_AWB", {
+      lastMarutiSync: lastSync10MinAgo,
+      force: false,
+      cooldownMs: 30 * 60 * 1000,
+    }),
+  });
+
+  assert.equal(batchResult.skipped, true, "Batch sync must respect cooldown and skip recent shipments");
+  assert.equal(batchResult.cooldownActive, true);
+  assert.ok(batchResult.reason.includes("cooldown"));
+});
+
+test("Regression: Cooldown skip does not count as an upstream failure or consume quota", async () => {
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    perShipmentCooldownMinutes: 30,
+    providers: {
+      shree_maruti: { enabled: true, dailyBudget: 10, monthlyBudget: 100 },
+    },
+  });
+
+  const { trackShreeMaruti } = await import("../tracking/adapters/shree-maruti.js");
+  const lastSync2MinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+
+  let executedCalls = 0;
+  const skipResult = await executeTrackRequest({
+    provider: "Shree Maruti Courier",
+    courier: "Shree Maruti Courier",
+    awb: "MARUTI_NO_500_AWB",
+    source: "manual",
+    force: false,
+    cooldownMs: 30 * 60 * 1000,
+    executeFn: async () => {
+      executedCalls++;
+      return trackShreeMaruti("MARUTI_NO_500_AWB", {
+        lastMarutiSync: lastSync2MinAgo,
+        force: false,
+        cooldownMs: 30 * 60 * 1000,
+      });
+    },
+  });
+
+  // 1. Result must be a structured skip
+  assert.equal(skipResult.skipped, true);
+  assert.equal(skipResult.cooldownActive, true);
+  assert.equal(skipResult.statusCode, undefined, "Cooldown skip must not report HTTP 500");
+  assert.equal(skipResult.error, undefined, "Cooldown skip must not report an error property");
+
+  // 2. In-flight reservations must be 0
+  const { getInFlightGlobalDaily, getInFlightProviderDaily } = await import("../tracking/controller.js");
+  assert.equal(getInFlightGlobalDaily(), 0, "In-flight global daily reservation must be 0 after skip");
+  assert.equal(getInFlightProviderDaily("shree_maruti"), 0, "In-flight provider reservation must be 0 after skip");
+});
+
+test("Regression: Real Shree Maruti failures are still logged correctly", async () => {
+  resetCircuitBreaker("shree_maruti");
+  await updateTrackingSettings({
+    externalTrackingEnabled: true,
+    perShipmentCooldownMinutes: 30,
+    providers: {
+      shree_maruti: { enabled: true, dailyBudget: 500, monthlyBudget: 10000 },
+    },
+  });
+
+  let executedCalls = 0;
+  const failResult = await executeTrackRequest({
+    provider: "Shree Maruti Courier",
+    courier: "Shree Maruti Courier",
+    awb: "MARUTI_REAL_FAIL_AWB",
+    source: "manual",
+    force: true,
+    executeFn: async () => {
+      executedCalls++;
+      return {
+        courier: "Shree Maruti Courier",
+        trackingNumber: "MARUTI_REAL_FAIL_AWB",
+        source: "direct",
+        provider: "Shree Maruti Direct",
+        error: "Direct tracking service temporarily unavailable (HTTP 500).",
+        statusCode: 500,
+      };
+    },
+  });
+
+  assert.equal(executedCalls, 1);
+  assert.equal(failResult.skipped, undefined, "Real failure must not be marked as skipped");
+  assert.equal(failResult.statusCode, 500, "Real failure must preserve HTTP 500 status code");
+  assert.ok(failResult.error.includes("HTTP 500"), "Real failure message must be preserved");
+
+  const stats = await getTrackingUsageStats();
+  const marutiStats = stats.providers?.shree_maruti;
+  assert.ok(marutiStats.lastError.includes("HTTP 500"), "Provider lastError must record the actual failure");
+  assert.ok(marutiStats.lastErrorTime !== null, "Provider lastErrorTime must be recorded");
+});

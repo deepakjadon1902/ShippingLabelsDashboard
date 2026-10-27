@@ -702,6 +702,20 @@ export function executeTrackRequest({
       try {
         result = await executeFn();
 
+        // If the adapter returned a structured skip (e.g. adapter-level cooldown),
+        // return structured skip without consuming quota or creating a failed ledger entry.
+        if (result?.skipped) {
+          logTrackingDiagnostic("info", "Tracking skipped during adapter execution", {
+            provider,
+            courier,
+            awb: cleanAwb,
+            source,
+            reason: result.reason,
+            cooldownActive: result.cooldownActive,
+          });
+          return result;
+        }
+
         statusCode = result.statusCode || (result.error ? 500 : 200);
         errorMessage = result.error || null;
         isSuccess = !result.error && (!!result.status || !!result.rawStatus);
@@ -757,32 +771,34 @@ export function executeTrackRequest({
         const durationMs = Date.now() - startTime;
         releaseConcurrencySlot();
 
-        logTrackingDiagnostic(isSuccess ? "info" : "warn", "Completed tracking execution", {
-          provider,
-          courier,
-          awb: cleanAwb,
-          source,
-          statusCode,
-          success: isSuccess,
-          durationMs,
-        });
+        if (!result?.skipped) {
+          logTrackingDiagnostic(isSuccess ? "info" : "warn", "Completed tracking execution", {
+            provider,
+            courier,
+            awb: cleanAwb,
+            source,
+            statusCode,
+            success: isSuccess,
+            durationMs,
+          });
 
-        // Safe ledger logging
-        if (mongoose.connection.readyState === 1) {
-          try {
-            await TrackingLedger.create({
-              provider: providerKey,
-              courier_name: courier,
-              awb: cleanAwb,
-              source,
-              status_code: statusCode,
-              success: isSuccess,
-              error_message: errorMessage ? errorMessage.slice(0, 300) : null,
-              duration_ms: durationMs,
-              quota_consumed: 1,
-            });
-          } catch (ledgerErr) {
-            // Ignore ledger db write errors in testing/disconnected state
+          // Safe ledger logging (only for queries actually dispatched upstream)
+          if (mongoose.connection.readyState === 1) {
+            try {
+              await TrackingLedger.create({
+                provider: providerKey,
+                courier_name: courier,
+                awb: cleanAwb,
+                source,
+                status_code: statusCode,
+                success: isSuccess,
+                error_message: errorMessage ? errorMessage.slice(0, 300) : null,
+                duration_ms: durationMs,
+                quota_consumed: 1,
+              });
+            } catch (ledgerErr) {
+              // Ignore ledger db write errors in testing/disconnected state
+            }
           }
         }
       }

@@ -4,7 +4,7 @@ const COURIER_NAME = "Shree Maruti Courier";
 const PROVIDER_NAME = "Shree Maruti Direct";
 const DIRECT_TRACKING_BASE_URL = "https://apis-hubops.innofulfill.com/tracking/v2";
 
-export const MARUTI_DEFAULT_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
+export const MARUTI_DEFAULT_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes (matches default perShipmentCooldownMinutes)
 
 // In-memory global upstream 429 cooldown tracker
 let globalMarutiBlockedUntil = 0;
@@ -141,14 +141,19 @@ export async function trackShreeMaruti(trackingNumber, options = {}) {
   if (!force && lastMarutiSync) {
     const lastSyncTime = new Date(lastMarutiSync).getTime();
     if (!isNaN(lastSyncTime) && now - lastSyncTime < cooldownMs) {
-      const remainingMinutes = Math.ceil((cooldownMs - (now - lastSyncTime)) / 60000);
-      return createTrackingResult({
+      const remainingSeconds = Math.ceil((cooldownMs - (now - lastSyncTime)) / 1000);
+      const remainingMinutes = Math.ceil(remainingSeconds / 60);
+      return {
+        skipped: true,
+        cooldownActive: true,
+        remainingSeconds,
+        remainingMinutes,
+        reason: `Shree Maruti sync skipped: shipment checked within cooldown (${remainingMinutes}m remaining).`,
         courier: COURIER_NAME,
         trackingNumber: waybill,
         source: "direct",
         provider: PROVIDER_NAME,
-        error: `Shree Maruti sync skipped: shipment checked within cooldown (${remainingMinutes}m remaining).`,
-      });
+      };
     }
   }
 

@@ -340,14 +340,21 @@ export async function trackShipment(courierName, trackingNumber, options = {}) {
       }
     }
   } else if (courier === "Shree Maruti Courier") {
+    const settings = getTrackingSettings();
+    const cooldownMinutes = settings?.perShipmentCooldownMinutes ?? 30;
+    const cooldownMs = options.cooldownMs ?? (cooldownMinutes * 60 * 1000);
+
     primaryResult = await executeTrackRequest({
       provider: "Shree Maruti Courier",
       courier,
       awb: waybill,
       source,
       force,
-      cooldownMs: options.cooldownMs,
-      executeFn: () => trackShreeMaruti(waybill, options),
+      cooldownMs,
+      executeFn: () => trackShreeMaruti(waybill, {
+        ...options,
+        cooldownMs,
+      }),
     });
   } else if (courier === "Delhivery") {
     primaryResult = await executeTrackRequest({
@@ -669,11 +676,15 @@ export async function refreshOneLabel(label, options = {}) {
     };
   }
 
+  const settings = getTrackingSettings();
+  const cooldownMinutes = settings?.perShipmentCooldownMinutes ?? 30;
+  const cooldownMs = options.cooldownMs ?? (cooldownMinutes * 60 * 1000);
+
   const trackingResult = await trackShipment(label.courier_name, label.tracking_id, {
     lastTrackcourierSync: label.last_trackcourier_sync,
     lastMarutiSync: label.last_maruti_sync,
     force: options.force || false,
-    cooldownMs: options.cooldownMs,
+    cooldownMs,
     source: options.source || "manual",
     allowFallback: options.allowFallback || false,
   });
